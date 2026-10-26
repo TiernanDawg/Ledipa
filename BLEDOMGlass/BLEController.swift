@@ -35,6 +35,9 @@ final class BLEController: NSObject, ObservableObject {
         CBUUID(string: "FFF3"), CBUUID(string: "FFE1"), CBUUID(string: "FFE9")
     ]
     private let presetsKey = "luma.saved-presets.v1"
+    private let rememberedDeviceIDKey = "morgs-led.remembered-device-id"
+    private let rememberedDeviceNameKey = "morgs-led.remembered-device-name"
+    private let autoConnectKey = "morgs-led.auto-connect"
 
     override init() {
         super.init()
@@ -53,6 +56,10 @@ final class BLEController: NSObject, ObservableObject {
             ]
         }
     }
+
+    var autoConnectEnabled: Bool { UserDefaults.standard.object(forKey: autoConnectKey) as? Bool ?? true }
+    var rememberedDeviceID: String? { UserDefaults.standard.string(forKey: rememberedDeviceIDKey) }
+    var rememberedDeviceName: String? { UserDefaults.standard.string(forKey: rememberedDeviceNameKey) }
 
     var currentColor: Color { Color(red: red, green: green, blue: blue) }
     var rgbHex: String {
@@ -74,6 +81,9 @@ final class BLEController: NSObject, ObservableObject {
     }
 
     func connect(_ peripheral: CBPeripheral) {
+        UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: rememberedDeviceIDKey)
+        UserDefaults.standard.set(peripheral.name ?? "BLEDOM LED", forKey: rememberedDeviceNameKey)
+        objectWillChange.send()
         central.stopScan()
         isScanning = false
         status = "Connecting…"
@@ -85,6 +95,29 @@ final class BLEController: NSObject, ObservableObject {
     func disconnect() {
         guard let activePeripheral else { return }
         central.cancelPeripheralConnection(activePeripheral)
+    }
+
+    func setAutoConnectEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: autoConnectKey)
+        objectWillChange.send()
+        if enabled { attemptAutoConnect() }
+    }
+
+    func forgetRememberedDevice() {
+        UserDefaults.standard.removeObject(forKey: rememberedDeviceIDKey)
+        UserDefaults.standard.removeObject(forKey: rememberedDeviceNameKey)
+        UserDefaults.standard.set(false, forKey: autoConnectKey)
+        objectWillChange.send()
+    }
+
+    private func attemptAutoConnect() {
+        guard autoConnectEnabled, isPoweredOn, activePeripheral == nil,
+              let idString = rememberedDeviceID, let identifier = UUID(uuidString: idString) else { return }
+        guard let peripheral = central.retrievePeripherals(withIdentifiers: [identifier]).first else {
+            status = "Saved LED not currently available — scan to find it"
+            return
+        }
+        connect(peripheral)
     }
 
     func setColor(red r: Double, green g: Double, blue b: Double) {
@@ -153,6 +186,8 @@ extension BLEController: CBCentralManagerDelegate {
         isPoweredOn = central.state == .poweredOn
         if !isPoweredOn {
             status = central.state == .unauthorized ? "Bluetooth permission required" : "Bluetooth is unavailable"
+        } else if autoConnectEnabled, rememberedDeviceID != nil {
+            attemptAutoConnect()
         } else if status == "Ready to scan" {
             status = "Ready to find your light"
         }
