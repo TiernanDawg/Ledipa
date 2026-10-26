@@ -1,4 +1,4 @@
-name: Build Luma IPA
+name: Build Morg’s LED IPA
 
 on:
   workflow_dispatch:
@@ -33,15 +33,15 @@ jobs:
             build
       - name: Package unsigned IPA
         run: |
-          APP="build/DerivedData/Build/Products/Release-iphoneos/Luma.app"
+          APP="build/DerivedData/Build/Products/Release-iphoneos/Morgs LED.app"
           test -d "$APP"
           mkdir -p build/Payload
-          cp -R "$APP" build/Payload/Luma.app
-          (cd build && /usr/bin/zip -qry Luma-unsigned.ipa Payload)
+          cp -R "$APP" build/Payload/"Morgs LED.app"
+          (cd build && /usr/bin/zip -qry Morgs-LED-unsigned.ipa Payload)
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Luma-unsigned-ipa
-          path: build/Luma-unsigned.ipa
+          name: Morgs-LED-unsigned-ipa
+          path: build/Morgs-LED-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
