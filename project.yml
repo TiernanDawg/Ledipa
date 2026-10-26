@@ -11,11 +11,11 @@ targets:
       - BLEDOMGlass
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.tiernandawg.luma
-        PRODUCT_NAME: Luma
-        INFOPLIST_KEY_CFBundleDisplayName: Luma
-        INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: Luma uses Bluetooth to find and control your nearby LED strip. No account or internet connection is required.
-        INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription: Luma uses Bluetooth to control your LED strip.
+        PRODUCT_BUNDLE_IDENTIFIER: com.tiernandawg.morgsled
+        PRODUCT_NAME: "Morgs LED"
+        INFOPLIST_KEY_CFBundleDisplayName: "Morg’s LED"
+        INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: "Morg’s LED uses Bluetooth to find and control your nearby LED strip. No account or internet connection is required."
+        INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription: "Morg’s LED uses Bluetooth to control your LED strip."
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: YES
