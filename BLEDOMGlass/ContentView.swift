@@ -36,6 +36,8 @@ struct ContentView: View {
                     colorCard
                     brightnessCard
                     scenesCard
+                    CreativeModesView()
+                    RepairDiagnosticsView()
                     presetsCard
                     footer
                 }
