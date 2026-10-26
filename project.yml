@@ -1,0 +1,23 @@
+name: Luma
+options:
+  bundleIdPrefix: com.tiernandawg
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  Luma:
+    type: application
+    platform: iOS
+    sources:
+      - BLEDOMGlass
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tiernandawg.luma
+        PRODUCT_NAME: Luma
+        INFOPLIST_KEY_CFBundleDisplayName: Luma
+        INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: Luma uses Bluetooth to find and control your nearby LED strip. No account or internet connection is required.
+        INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription: Luma uses Bluetooth to control your LED strip.
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGNING_ALLOWED: NO
