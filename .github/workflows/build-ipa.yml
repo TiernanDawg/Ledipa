@@ -1,0 +1,47 @@
+name: Build Luma IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer || true
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Build device app
+        run: |
+          xcodebuild \
+            -project Luma.xcodeproj \
+            -scheme Luma \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+      - name: Package unsigned IPA
+        run: |
+          APP="build/DerivedData/Build/Products/Release-iphoneos/Luma.app"
+          test -d "$APP"
+          mkdir -p build/Payload
+          cp -R "$APP" build/Payload/Luma.app
+          (cd build && /usr/bin/zip -qry Luma-unsigned.ipa Payload)
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Luma-unsigned-ipa
+          path: build/Luma-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
