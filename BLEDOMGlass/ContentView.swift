@@ -29,22 +29,12 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             ambientBackground
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 22) {
-                    header
-                    connectionCard
-                    colorCard
-                    brightnessCard
-                    scenesCard
-                    CreativeModesView()
-                    RepairDiagnosticsView()
-                    presetsCard
-                    footer
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 34)
-            }
+            TabView {
+                controlPage.tabItem { Label("Controls", systemImage: "slider.horizontal.3") }
+                effectsPage.tabItem { Label("Effects", systemImage: "sparkles") }
+                presetsPage.tabItem { Label("Presets", systemImage: "swatchpalette") }
+                settingsPage.tabItem { Label("Settings", systemImage: "gearshape") }
+            }.tint(.cyan)
         }
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showingDevices) { devicesSheet.presentationDetents([.medium, .large]) }
@@ -53,6 +43,96 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) { }
             Button("Save") { lights.saveCurrentPreset(name: presetName) }
         } message: { Text("Your color will be saved on this iPhone.") }
+    }
+
+    private var controlPage: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 18) {
+                header
+                connectionCard
+                colorCard
+                brightnessCard
+            }.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 28)
+        }
+    }
+
+    private var effectsPage: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 18) {
+                pageHeading("Effects", subtitle: "Set a scene or make your lights react.")
+                scenesCard
+                CreativeModesView()
+            }.padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 28)
+        }
+    }
+
+    private var presetsPage: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 18) {
+                pageHeading("Your palette", subtitle: "Saved colors, ready in one tap.")
+                presetsCard
+                Button {
+                    presetName = ""
+                    showingSaveAlert = true
+                } label: {
+                    Label("Save current color", systemImage: "bookmark.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(maxWidth: .infinity).padding(.vertical, 14)
+                        .background(.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 16))
+                }.buttonStyle(.plain).foregroundStyle(.white)
+            }.padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 28)
+        }
+    }
+
+    private var settingsPage: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 18) {
+                pageHeading("Settings", subtitle: "Connection preferences and diagnostics.")
+                autoConnectCard
+                RepairDiagnosticsView()
+                footer
+            }.padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 28)
+        }
+    }
+
+    private func pageHeading(_ title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("MORG’S LED").font(.system(size: 11, weight: .bold, design: .rounded)).tracking(2.4)
+                .foregroundStyle(.white.opacity(0.55))
+            Text(title).font(.system(size: 30, weight: .semibold, design: .rounded)).tracking(-0.8)
+                .foregroundStyle(.white)
+            Text(subtitle).font(.system(size: 13)).foregroundStyle(.white.opacity(0.52))
+        }.padding(.bottom, 2)
+    }
+
+    private var autoConnectCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeading("Auto-connect", subtitle: "Reconnect to your chosen strip when Bluetooth is available.")
+            Toggle("Reconnect to last LED", isOn: Binding(
+                get: { lights.autoConnectEnabled },
+                set: { lights.setAutoConnectEnabled($0) }
+            )).tint(.cyan)
+            HStack(spacing: 10) {
+                Image(systemName: "lightbulb.led.fill").foregroundStyle(.cyan)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(lights.rememberedDeviceName ?? "No LED selected yet")
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                    Text(lights.rememberedDeviceID == nil ? "Connect to a device once to remember it." : "Saved on this iPhone")
+                        .font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
+                }
+                Spacer()
+                Button("Choose") {
+                    showingDevices = true
+                    if lights.devices.isEmpty { lights.scan() }
+                }.font(.system(size: 12, weight: .semibold))
+            }
+            if lights.rememberedDeviceID != nil {
+                Button("Forget saved LED", role: .destructive) { lights.forgetRememberedDevice() }
+                    .font(.system(size: 12, weight: .medium))
+            }
+            Text("Auto-connect targets the Bluetooth device selected before. The strip must still be powered on and nearby.")
+                .font(.system(size: 10)).foregroundStyle(.white.opacity(0.42)).fixedSize(horizontal: false, vertical: true)
+        }.padding(18).glassPanel().foregroundStyle(.white)
     }
 
     private var ambientBackground: some View {
