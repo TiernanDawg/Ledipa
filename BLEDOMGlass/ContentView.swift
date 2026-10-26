@@ -185,7 +185,7 @@ struct ContentView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 ProgressView().tint(.cyan)
                                 Text(lights.status).font(.subheadline).foregroundStyle(.secondary)
-                            }.padding(.vertical, 12).listRowBackground(.white.opacity(0.04))
+                            }.padding(.vertical, 12).listRowBackground(Color.white.opacity(0.04))
                         }
                         ForEach(lights.devices, id: \.identifier) { device in
                             Button { lights.connect(device); showingDevices = false } label: {
@@ -198,7 +198,7 @@ struct ContentView: View {
                                     Spacer()
                                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                                 }
-                            }.listRowBackground(.white.opacity(0.04))
+                            }.listRowBackground(Color.white.opacity(0.04))
                         }
                     } header: { Text("Nearby lights") }
                 }.scrollContentBackground(.hidden)
