@@ -3,9 +3,10 @@ import AVFoundation
 import Combine
 import Accelerate
 
-/// Microphone spectrum analyzer. The strip accepts one RGB value, so the three
-/// frequency bands are mapped into whole-strip color rather than fake segments.
-@MainActor final class AudioAnalyzer: ObservableObject {
+/// Low-latency microphone level analyzer. The BLE controller accepts one RGB
+/// value, so these broad sound bands drive a single whole-strip color.
+@MainActor
+final class AudioAnalyzer: ObservableObject {
     @Published private(set) var bass = 0.0
     @Published private(set) var mid = 0.0
     @Published private(set) var high = 0.0
@@ -13,99 +14,107 @@ import Accelerate
     @Published private(set) var message = "Microphone is off"
 
     private let engine = AVAudioEngine()
-    private let frameCount = 2048
-    private var fftSetup: vDSP_DFT_Setup?
-    private var sampleRate = 44_100.0
     private var lastPublish = Date.distantPast
+    private var generation = 0
 
     func start() {
         guard !isRunning else { return }
+        message = "Requesting microphone access…"
         AVAudioApplication.requestRecordPermission { [weak self] allowed in
             Task { @MainActor in
                 guard let self else { return }
-                guard allowed else { self.message = "Microphone permission denied"; return }
+                guard allowed else {
+                    self.message = "Microphone permission denied. Enable it in Settings → Privacy & Security → Microphone."
+                    return
+                }
                 self.configure()
             }
         }
     }
 
     private func configure() {
+        stopEngineOnly()
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: .measurement, options: [.mixWithOthers, .defaultToSpeaker])
             try session.setActive(true)
+
             let input = engine.inputNode
             let format = input.outputFormat(forBus: 0)
             guard format.channelCount > 0, format.sampleRate > 0 else {
-                message = "No microphone input available"
+                message = "No microphone input is available"
                 return
             }
-            sampleRate = format.sampleRate
-            fftSetup = vDSP_DFT_zrop_CreateSetup(nil, vDSP_Length(frameCount), .FORWARD)
-            guard fftSetup != nil else { message = "Audio analyzer could not initialize"; return }
 
-            input.installTap(onBus: 0, bufferSize: AVAudioFrameCount(frameCount), format: format) { [weak self] buffer, _ in
-                guard let self, let channel = buffer.floatChannelData?[0] else { return }
+            generation += 1
+            let activeGeneration = generation
+            input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+                guard let channel = buffer.floatChannelData?[0] else { return }
                 let count = Int(buffer.frameLength)
-                guard count == self.frameCount else { return }
+                guard count > 32 else { return }
 
-                var window = [Float](repeating: 0, count: count)
-                vDSP_hann_window(&window, vDSP_Length(count), Int32(vDSP_HANN_NORM))
-                var realInput = [Float](repeating: 0, count: count)
-                vDSP_vmul(channel, 1, window, 1, &realInput, 1, vDSP_Length(count))
-                var imaginaryInput = [Float](repeating: 0, count: count)
-                var realOutput = [Float](repeating: 0, count: count / 2)
-                var imaginaryOutput = [Float](repeating: 0, count: count / 2)
-
-                guard let setup = self.fftSetup else { return }
-                vDSP_DFT_Execute(setup, &realInput, &imaginaryInput, &realOutput, &imaginaryOutput)
-
-                let binWidth = self.sampleRate / Double(count)
-                func band(_ low: Double, _ high: Double) -> Double {
-                    let first = max(1, Int(low / binWidth))
-                    let last = min(realOutput.count - 1, Int(high / binWidth))
-                    guard last >= first else { return 0 }
-                    var sum = 0.0
-                    for index in first...last {
-                        let re = Double(realOutput[index])
-                        let im = Double(imaginaryOutput[index])
-                        sum += re * re + im * im
+                var rms: Float = 0
+                vDSP_rmsqv(channel, 1, &rms, vDSP_Length(count))
+                var crossings = 0
+                if count > 1 {
+                    for i in 1..<count where (channel[i - 1] < 0 && channel[i] >= 0) || (channel[i - 1] >= 0 && channel[i] < 0) {
+                        crossings += 1
                     }
-                    let mean = sqrt(sum / Double(last - first + 1))
-                    return min(1, mean * 0.055)
                 }
+                let crossingRate = Double(crossings) / Double(count)
+                let level = min(1.0, max(0.0, (Double(rms) - 0.002) * 14.0))
+                let highShare = min(1.0, crossingRate * 8.0)
+                let low = level * (1.0 - highShare * 0.72)
+                let high = level * highShare
+                let mid = level * (0.35 + 0.45 * (1.0 - abs(highShare - 0.5) * 2.0))
 
-                let values = (band(60, 250), band(250, 2_000), band(2_000, min(8_000, self.sampleRate / 2)))
-                Task { @MainActor in
+                Task { @MainActor [weak self] in
+                    guard let self, self.generation == activeGeneration else { return }
                     let now = Date()
-                    guard now.timeIntervalSince(self.lastPublish) >= 0.035 else { return }
+                    guard now.timeIntervalSince(self.lastPublish) >= 0.05 else { return }
                     self.lastPublish = now
-                    self.bass = self.bass * 0.58 + values.0 * 0.42
-                    self.mid = self.mid * 0.58 + values.1 * 0.42
-                    self.high = self.high * 0.58 + values.2 * 0.42
+                    self.bass = self.bass * 0.55 + low * 0.45
+                    self.mid = self.mid * 0.55 + mid * 0.45
+                    self.high = self.high * 0.55 + high * 0.45
+                    if !self.isRunning {
+                        self.isRunning = true
+                        self.message = "Microphone active · reacting to nearby sound"
+                    }
                 }
             }
+
             engine.prepare()
             try engine.start()
             isRunning = true
-            message = "Listening · bass, mids and highs"
+            message = "Listening for nearby sound…"
         } catch {
-            message = "Audio unavailable: \(error.localizedDescription)"
-            stop()
+            stopEngineOnly()
+            isRunning = false
+            message = "Microphone unavailable: \(error.localizedDescription)"
+        }
+    }
+
+    private func stopEngineOnly() {
+        if engine.isRunning {
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+        } else {
+            engine.inputNode.removeTap(onBus: 0)
         }
     }
 
     func stop() {
-        if engine.isRunning {
-            engine.inputNode.removeTap(onBus: 0)
-            engine.stop()
-        }
-        fftSetup = nil
-        bass = 0; mid = 0; high = 0
+        generation += 1
+        stopEngineOnly()
+        bass = 0
+        mid = 0
+        high = 0
         isRunning = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         message = "Microphone is off"
     }
 
-    deinit { engine.stop() }
+    deinit {
+        engine.stop()
+    }
 }
