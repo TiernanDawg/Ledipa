@@ -46,6 +46,22 @@ struct LEDScene: Identifiable, Hashable {
 }
 
 enum ColorScience {
+    static func mixColor(_ first: Color, _ second: Color, t: Double) -> Color {
+        let a=first.oklabComponents, b=second.oklabComponents
+        let u=max(0,min(1,t))
+        let L=a.x+(b.x-a.x)*u, A=a.y+(b.y-a.y)*u, B=a.z+(b.z-a.z)*u
+        let l=L+0.3963377774*A+0.2158037573*B
+        let m=L-0.1055613458*A-0.0638541728*B
+        let ss=L-0.0894841775*A-1.2914855480*B
+        let l3=l*l*l, m3=m*m*m, s3=ss*ss*ss
+        func gamma(_ v:Double)->Double {
+            let x=max(0,v)
+            return x <= 0.0031308 ? 12.92*x : 1.055*pow(x,1/2.4)-0.055
+        }
+        return Color(red:min(1,gamma(4.0767416621*l3-3.3077115913*m3+0.2309699292*s3)),
+                     green:min(1,gamma(-1.2684380046*l3+2.6097574011*m3-0.3413193965*s3)),
+                     blue:min(1,gamma(-0.0041960863*l3-0.7034186147*m3+1.707614701*s3)))
+    }
     static func mixOKLab(_ a: SIMD3<Double>, _ b: SIMD3<Double>, t: Double) -> SIMD3<Double> {
         let l = a.x + (b.x-a.x)*t, m = a.y + (b.y-a.y)*t, s = a.z + (b.z-a.z)*t
         let l3=l*l*l, m3=m*m*m, s3=s*s*s
@@ -54,4 +70,18 @@ enum ColorScience {
                       max(0,min(1, -0.0041960863*l3 - 0.7034186147*m3 + 1.707614701*s3)) )
     }
     static func gamma(_ value: Double) -> Double { pow(max(0,min(1,value)), 2.2) }
+}
+
+private extension Color {
+    var oklabComponents: SIMD3<Double> {
+        let ui=UIColor(self); var r:CGFloat=0,g:CGFloat=0,b:CGFloat=0,a:CGFloat=0
+        ui.getRed(&r,green:&g,blue:&b,alpha:&a)
+        let rr=Double(r),gg=Double(g),bb=Double(b)
+        let l=cbrt(0.4122214708*rr+0.5363325363*gg+0.0514459929*bb)
+        let m=cbrt(0.2119034982*rr+0.6806995451*gg+0.1073969566*bb)
+        let ss=cbrt(0.0883024619*rr+0.2817188376*gg+0.6299787005*bb)
+        return SIMD3(0.2104542553*l+0.7936177850*m-0.0040720468*ss,
+                     1.9779984951*l-2.4285922050*m+0.4505937099*ss,
+                     0.0259040371*l+0.7827717662*m-0.8086757660*ss)
+    }
 }
