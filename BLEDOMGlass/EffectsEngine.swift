@@ -7,6 +7,8 @@ struct LEDScene: Identifiable, Hashable {
     let category: String
     let symbol: String
     let colors: [Color]
+    var motion: String = "Fade"
+    var speed: Double = 0.45
     var color: Color { colors.first ?? .white }
 
     static let library: [LEDScene] = [
