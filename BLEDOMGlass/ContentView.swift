@@ -51,6 +51,7 @@ struct ContentView: View {
         .sheet(isPresented:$showingDevices) { deviceSheet }
         .sheet(isPresented:$showDIY) { diySheet.presentationDetents([.large]) }
         .onAppear { restoreState() }
+        .onOpenURL { handleAutomationURL($0) }
         .onChange(of: temperature) { _, kelvin in
             let t = (kelvin - 2000) / 4500
             let warm = 1.0 - t * 0.32
@@ -347,6 +348,25 @@ struct ContentView: View {
         if !recent.contains(color) { recent.insert(color,at:0); recent=Array(recent.prefix(8)) }
         persistState()
     }
+    private func handleAutomationURL(_ url:URL) {
+        guard url.scheme == "morgsled" else { return }
+        switch url.host?.lowercased() {
+        case "power":
+            if url.path.lowercased() == "/on", !lights.isOn { lights.togglePower() }
+            if url.path.lowercased() == "/off", lights.isOn { lights.togglePower() }
+        case "brightness":
+            if let value=URLComponents(url:url,resolvingAgainstBaseURL:false)?.queryItems?.first(where:{$0.name == "value"})?.value,
+               let amount=Double(value), (0...100).contains(amount) { lights.setBrightness(amount) }
+        case "color":
+            if let hex=URLComponents(url:url,resolvingAgainstBaseURL:false)?.queryItems?.first(where:{$0.name == "hex"})?.value {
+                let cleaned=hex.trimmingCharacters(in:CharacterSet(charactersIn:"#"))
+                if cleaned.count == 6, let value=UInt32(cleaned,radix:16) {
+                    lights.setColor(red:Double((value >> 16) & 255)/255,green:Double((value >> 8) & 255)/255,blue:Double(value & 255)/255)
+                }
+            }
+        default: break
+        }
+    }
     private func applyThrottled(_ color:Color) {
         guard Date().timeIntervalSinceReferenceDate - lastAudioWrite >= 0.04 else { return }
         lastAudioWrite=Date().timeIntervalSinceReferenceDate; apply(color)
@@ -367,7 +387,8 @@ struct ContentView: View {
         sceneTask?.cancel()
         guard !scene.colors.isEmpty else { apply(.white); return }
         lights.setBrightness(sceneBrightness)
-        let interval=max(0.12,2.2-(scene.speed*1.9))
+        let selectedSpeed = scene.category == "DIY" ? scene.speed : sceneSpeed
+        let interval=max(0.12,2.2-(selectedSpeed*1.9))
         sceneTask=Task { @MainActor in
             var index=0
             while !Task.isCancelled {
