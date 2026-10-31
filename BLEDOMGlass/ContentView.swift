@@ -513,17 +513,6 @@ struct ContentView: View {
         }.preferredColorScheme(.dark)
     }
 
-    private var scenePlayerSheet: some View {
-        VStack(alignment:.leading,spacing:18) {
-            HStack { Text(selectedScene?.name ?? "Scene").font(.system(size:24,weight:.bold,design:.rounded)); Spacer(); Button("Done"){showScenePlayer=false} }
-            HStack { Text("Speed"); Spacer(); Text("\(Int(sceneSpeed*100))%").monospacedDigit() }
-            Slider(value:$sceneSpeed,in:0.05...1).tint(accent)
-            HStack { Text("Brightness"); Spacer(); Text("\(Int(sceneBrightness))%").monospacedDigit() }
-            Slider(value:$sceneBrightness,in:1...100).tint(accent)
-            Button("Stop scene",systemImage:"stop.fill",role:.destructive){stopScene();showScenePlayer=false}.buttonStyle(.glass)
-        }.padding(24).presentationBackground(.ultraThinMaterial)
-    }
-
     private var visibleScenes:[LEDScene] {
         let all=LEDScene.library+diySaved
         return selectedCategory == "All" ? all : all.filter{$0.category == selectedCategory}
