@@ -96,7 +96,15 @@ struct ContentView: View {
                 HStack(alignment:.center) {
                     Text(title).font(.system(size:30,weight:.bold,design:.rounded)).tracking(-0.8)
                     Spacer(minLength:8)
-                    statusPill
+                    GlassEffectContainer(spacing:8) {
+                        HStack(spacing:8) {
+                            Button { showingInfo=true } label: {
+                                Image(systemName:"info").font(.system(size:12,weight:.bold)).frame(width:34,height:34)
+                                    .glassEffect(.regular.interactive(),in:.circle).glassEffectID("info-button",in:glassSpace)
+                            }.buttonStyle(.plain).accessibilityLabel("Information")
+                            statusPill
+                        }
+                    }
                 }.padding(.top,8)
                 content()
             }
@@ -123,7 +131,7 @@ struct ContentView: View {
                 Image(systemName:"chevron.down").font(.system(size:9,weight:.bold)).opacity(0.65)
             }
             .padding(.horizontal,12).padding(.vertical,9)
-            .controlGlass(id:"device",tint:lights.connectedName == nil ? .white.opacity(0.05) : .green.opacity(0.14))
+            .glassControl(id:"device",namespace:glassSpace,tint:lights.connectedName == nil ? .white.opacity(0.05) : .green.opacity(0.14))
         }.buttonStyle(.plain).accessibilityLabel("Bluetooth device, \(lights.connectedName ?? "not connected")")
     }
 
@@ -521,16 +529,6 @@ struct ContentView: View {
         return selectedCategory == "All" ? all : all.filter{$0.category == selectedCategory}
     }
 
-    private func controlGlass(id:String,tint:Color = .clear)->some View {
-        Group {
-            if #available(iOS 26.0, *), !reduceTransparency {
-                Capsule().fill(.clear).overlay(Capsule().fill(tint.opacity(0.18))).glassEffect(.regular.tint(tint).interactive()).glassEffectID(id,in:glassSpace)
-            } else {
-                Capsule().fill(Color.white.opacity(0.12)).overlay(Capsule().stroke(.white.opacity(0.18),lineWidth:1))
-            }
-        }
-    }
-
     private func panelGlass()->some View {
         Group {
             if #available(iOS 26.0, *), !reduceTransparency {
@@ -719,6 +717,25 @@ private extension Color {
 private extension View {
     func panelGlass()->some View {
         modifier(PanelGlassModifier())
+    }
+}
+
+private struct GlassControlModifier:ViewModifier {
+    let id:String
+    let namespace:Namespace.ID
+    let tint:Color
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    func body(content:Content)->some View {
+        if #available(iOS 26.0,*),!reduceTransparency {
+            content.padding(.horizontal,12).padding(.vertical,8)
+                .background(tint.opacity(0.12),in:Capsule())
+                .glassEffect(.regular.tint(tint).interactive(),in:.capsule)
+                .glassEffectID(id,in:namespace)
+        } else {
+            content.padding(.horizontal,12).padding(.vertical,8)
+                .background(.black.opacity(0.6),in:Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.2),lineWidth:1))
+        }
     }
 }
 
