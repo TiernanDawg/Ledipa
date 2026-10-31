@@ -6,10 +6,11 @@ struct ContentView: View {
     @EnvironmentObject private var lights: BLEController
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @StateObject private var audio = AudioAnalyzer()
     @StateObject private var timers = TimerCenter()
     @Namespace private var glassSpace
+
     @State private var tab = 0
     @State private var hue = 0.57
     @State private var temperature = 4200.0
@@ -20,6 +21,7 @@ struct ContentView: View {
     @State private var sceneBrightness = 80.0
     @State private var selectedScene: LEDScene?
     @State private var showingDevices = false
+    @State private var showingInfo = false
     @State private var diyName = ""
     @State private var diyColors: [Color] = [.cyan,.purple]
     @State private var diyMode = "Breathe"
@@ -30,293 +32,446 @@ struct ContentView: View {
     @State private var favorites: [Color] = []
     @State private var showDIY = false
     @State private var timerDate = Date()
-    @State private var selectedTimer = "Sleep fade"
+    @State private var showScenePlayer = false
+    @State private var bloom = false
 
     private let categories = ["All","Ambient","Nature","Party","Gaming","Cozy","Sleep"]
     private let modes = ["Fade","Pulse","Breathe","Strobe","Rainbow","Candle flicker","Aurora"]
 
+    private var accent: Color {
+        let color = lights.isOn ? lights.currentColor : Color(red:0.28,green:0.30,blue:0.38)
+        return color.saturated(1.35)
+    }
+
     var body: some View {
         ZStack {
             driftingBackground
-            TabView(selection: $tab) {
-                home.tabItem { Label("Home", systemImage:"house.fill") }.tag(0)
-                scenes.tabItem { Label("Scenes", systemImage:"sparkles") }.tag(1)
-                music.tabItem { Label("Music", systemImage:"waveform") }.tag(2)
-                timersPage.tabItem { Label("Timers", systemImage:"timer") }.tag(3)
+            TabView(selection:$tab) {
+                home.tabItem { Label("Home",systemImage:"house.fill") }.tag(0)
+                scenes.tabItem { Label("Scenes",systemImage:"sparkles") }.tag(1)
+                music.tabItem { Label("Music",systemImage:"waveform") }.tag(2)
+                timersPage.tabItem { Label("Timers",systemImage:"timer") }.tag(3)
             }
-            .tint(.white)
+            .tint(accent)
+            .modifier(MinimizeTabBar())
         }
         .preferredColorScheme(.dark)
-        .animation(reduceMotion ? nil : .spring(response:0.42,dampingFraction:0.82), value:tab)
+        .animation(reduceMotion ? nil : .spring(response:0.42,dampingFraction:0.82),value:tab)
         .sheet(isPresented:$showingDevices) { deviceSheet }
         .sheet(isPresented:$showDIY) { diySheet.presentationDetents([.large]) }
+        .sheet(isPresented:$showScenePlayer) { scenePlayerSheet.presentationDetents([.medium]) }
+        .sheet(isPresented:$showingInfo) { infoSheet.presentationDetents([.medium,.large]) }
         .onAppear { restoreState() }
         .onOpenURL { handleAutomationURL($0) }
-        .onChange(of: temperature) { _, kelvin in
-            let t = (kelvin - 2000) / 4500
-            let warm = 1.0 - t * 0.32
-            let cool = 0.58 + t * 0.42
-            lights.setColor(red: min(1,warm), green: min(1,0.52 + t * 0.46), blue: min(1,cool))
+        .onChange(of:lights.currentColor) { _, color in
+            addRecent(color)
         }
-        .onChange(of: lights.currentColor) { _, color in
-            recent.insert(color, at:0); recent = Array(recent.prefix(8))
+        .onChange(of:temperature) { _, kelvin in
+            let t=(kelvin-2000)/4500
+            apply(Color(red:1.0-t*0.32,green:0.52+t*0.46,blue:0.58+t*0.42))
         }
+        .onChange(of:sceneSpeed) { _, value in if selectedScene != nil { restartScene() } }
+        .onChange(of:sceneBrightness) { _, value in lights.setBrightness(value) }
     }
 
     private var driftingBackground: some View {
-        TimelineView(.animation(minimumInterval: reduceMotion ? 1 : 0.08, paused: reduceMotion)) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-            let c = lights.isOn ? lights.currentColor : Color(red:0.035,green:0.045,blue:0.08)
+        TimelineView(.animation(minimumInterval:reduceMotion ? 1 : 0.08,paused:reduceMotion)) { timeline in
+            let t=timeline.date.timeIntervalSinceReferenceDate
+            let c=lights.isOn ? accent : Color(red:0.025,green:0.03,blue:0.055)
             MeshGradient(width:3,height:3,points:[
                 .init(0,0),.init(0.5,0),.init(1,0),
-                .init(0,0.5),.init(Float(0.5+0.12*sin(t*0.12)),Float(0.5+0.1*cos(t*0.1))),.init(1,0.5),
+                .init(0,0.5),.init(Float(0.5+0.11*sin(t*0.10)),Float(0.5+0.10*cos(t*0.09))),.init(1,0.5),
                 .init(0,1),.init(0.5,1),.init(1,1)
             ],colors:[
-                Color(red:0.018,green:0.024,blue:0.05),c.opacity(0.28),Color(red:0.025,green:0.02,blue:0.07),
-                c.opacity(0.18),Color(red:0.035,green:0.04,blue:0.085),Color(red:0.08,green:0.035,blue:0.11),
-                Color(red:0.025,green:0.035,blue:0.07),c.opacity(0.22),Color(red:0.018,green:0.025,blue:0.055)
+                Color(red:0.012,green:0.016,blue:0.035),c.opacity(0.26),Color(red:0.025,green:0.016,blue:0.05),
+                c.opacity(0.16),Color(red:0.018,green:0.025,blue:0.052),Color(red:0.045,green:0.018,blue:0.065),
+                Color(red:0.018,green:0.025,blue:0.05),c.opacity(0.20),Color(red:0.012,green:0.018,blue:0.04)
             ])
         }.ignoresSafeArea()
     }
 
+    private func screen<Content:View>(_ title:String,@ViewBuilder content:()->Content)->some View {
+        ScrollView(showsIndicators:false) {
+            VStack(alignment:.leading,spacing:16) {
+                HStack(alignment:.center) {
+                    Text(title).font(.system(size:30,weight:.bold,design:.rounded)).tracking(-0.8)
+                    Spacer(minLength:8)
+                    statusPill
+                }.padding(.top,8)
+                content()
+            }
+            .padding(.horizontal,20)
+            .padding(.top,4)
+            .padding(.bottom,24)
+            .frame(maxWidth:620)
+            .frame(maxWidth:.infinity)
+        }
+        .safeAreaInset(edge:.bottom,spacing:0) {
+            if tab == 1, selectedScene != nil { sceneDock.padding(.horizontal,16).padding(.top,8).padding(.bottom,4) }
+        }
+    }
+
     private var statusPill: some View {
-        Button { showingDevices = true; if lights.devices.isEmpty { lights.scan() } } label: {
+        Button {
+            showingDevices=true
+            if lights.devices.isEmpty { lights.scan() }
+        } label: {
             HStack(spacing:8) {
-                Circle().fill(lights.connectedName == nil ? (lights.status.contains("Connecting") ? .orange : .gray) : .green).frame(width:7,height:7)
-                Text(lights.connectedName ?? (lights.status.contains("Connecting") ? "Connecting" : "Offline"))
+                Circle().fill(lights.connectedName == nil ? (lights.status.localizedCaseInsensitiveContains("connect") ? .orange : .gray) : .green).frame(width:7,height:7)
+                Text(lights.connectedName ?? (lights.status.localizedCaseInsensitiveContains("connect") ? "Connecting" : "Not connected"))
                     .font(.system(size:12,weight:.semibold,design:.rounded)).lineLimit(1)
-                Image(systemName:"chevron.down").font(.system(size:9,weight:.bold)).opacity(0.6)
-            }.padding(.horizontal,14).padding(.vertical,10)
-                .glassSurface(corner:22,tint:lights.connectedName == nil ? .white.opacity(0.05) : .green.opacity(0.12), reduce:reduceTransparency)
-        }.buttonStyle(.plain)
+                Image(systemName:"chevron.down").font(.system(size:9,weight:.bold)).opacity(0.65)
+            }
+            .padding(.horizontal,12).padding(.vertical,9)
+            .controlGlass(id:"device",tint:lights.connectedName == nil ? .white.opacity(0.05) : .green.opacity(0.14))
+        }.buttonStyle(.plain).accessibilityLabel("Bluetooth device, \(lights.connectedName ?? "not connected")")
     }
 
     private var home: some View {
-        ScrollView(showsIndicators:false) {
-            VStack(spacing:22) {
-                HStack(alignment:.center) {
-                    VStack(alignment:.leading,spacing:4) {
-                        Text("MORG’S LED").font(.system(size:11,weight:.bold,design:.rounded)).tracking(2.4).foregroundStyle(.white.opacity(0.58))
-                        Text("Lighting").font(.system(size:34,weight:.bold,design:.rounded)).tracking(-1)
-                    }
-                    Spacer()
-                    statusPill
-                }.padding(.top,12)
-                HStack(spacing:20) {
-                    colorWheel.frame(width:235,height:235)
-                    VStack(spacing:14) {
-                        Text("BRIGHTNESS").font(.system(size:9,weight:.bold)).tracking(1.4).foregroundStyle(.white.opacity(0.55))
-                        Slider(value:Binding(get:{lights.brightness},set:{lights.setBrightness($0)}),in:1...100)
-                            .tint(lights.currentColor).rotationEffect(.degrees(-90)).frame(width:170,height:32)
-                            .frame(width:44,height:170)
-                        Text("\(Int(lights.brightness))%").font(.system(size:20,weight:.bold,design:.rounded)).monospacedDigit()
-                    }.glassSurface(corner:24,reduce:reduceTransparency).frame(maxHeight:210)
-                }
-                glassCard {
-                    VStack(alignment:.leading,spacing:13) {
-                        HStack { Text("White temperature").font(.system(size:15,weight:.semibold)); Spacer(); Text("\(Int(temperature))K").font(.system(size:13,weight:.semibold,design:.rounded)).monospacedDigit().foregroundStyle(.white.opacity(0.65)) }
-                        Slider(value:$temperature,in:2000...6500,step:50).tint(LinearGradient(colors:[.orange,.white,.cyan],startPoint:.leading,endPoint:.trailing))
-                        HStack { Text("Warm"); Spacer(); Text("Cool") }.font(.system(size:10)).foregroundStyle(.white.opacity(0.48))
-                    }
-                }
-                HStack(spacing:12) {
-                    Button { withAnimation(.spring(response:0.35)){ lights.togglePower() }; UIImpactFeedbackGenerator(style:.medium).impactOccurred() } label: {
-                        Label(lights.isOn ? "Power off" : "Power on",systemImage:"power").font(.system(size:16,weight:.semibold,design:.rounded))
-                            .frame(maxWidth:.infinity).padding(.vertical,17).foregroundStyle(.white)
-                            .glassSurface(corner:22,tint:lights.currentColor.opacity(0.34),reduce:reduceTransparency)
-                    }.buttonStyle(.plain)
-                    Button { showingDevices=true; lights.scan() } label: {
-                        Image(systemName:"dot.radiowaves.left.and.right").font(.system(size:17,weight:.semibold)).frame(width:58,height:56)
-                            .glassSurface(corner:20,reduce:reduceTransparency)
-                    }.buttonStyle(.plain)
-                }
-                colorStrip(title:"Recent",colors:recent)
-                colorStrip(title:"Favorites · long-press a color to remove",colors:favorites)
-                Text("Color temperature is approximated with RGB because this controller exposes only a standard RGB color command.")
-                    .font(.system(size:10)).foregroundStyle(.white.opacity(0.4)).frame(maxWidth:.infinity,alignment:.leading)
-            }.padding(.horizontal,20).padding(.bottom,110)
+        screen("Home") {
+            VStack(spacing:18) {
+                colorHero
+                controlPanel
+                colorsSection
+            }
         }
     }
 
-    private var colorWheel: some View {
-        ZStack {
-            Circle().stroke(AngularGradient(colors:[.red,.orange,.yellow,.green,.cyan,.blue,.purple,.pink,.red],center:.center),style:StrokeStyle(lineWidth:20,lineCap:.round))
-                .shadow(color:lights.currentColor.opacity(0.5),radius:18)
-            Circle().stroke(.white.opacity(0.12),lineWidth:1).padding(24)
-            Circle().fill(lights.currentColor.gradient).frame(width:115,height:115).shadow(color:lights.currentColor.opacity(0.65),radius:25)
-            VStack(spacing:2) {
-                Text(lights.rgbHex).font(.system(size:16,weight:.bold,design:.rounded)).monospacedDigit()
-                Text("CURRENT").font(.system(size:8,weight:.bold)).tracking(1.5).opacity(0.62)
+    private var colorHero: some View {
+        GeometryReader { geo in
+            let side=min(geo.size.width,340.0)
+            ZStack {
+                Circle().stroke(.white.opacity(0.08),style:StrokeStyle(lineWidth:28,lineCap:.round)).padding(10)
+                Circle().trim(from:0,to:1).stroke(AngularGradient(colors:[.red,.orange,.yellow,.green,.cyan,.blue,.purple,.pink,.red],center:.center),style:StrokeStyle(lineWidth:28,lineCap:.round))
+                    .rotationEffect(.degrees(-90)).padding(10)
+                    Circle().stroke(.white.opacity(0.14),lineWidth:1).padding(34)
+                Circle().fill(lights.currentColor.gradient).frame(width:side*0.38,height:side*0.38)
+                    .overlay(Circle().fill(.white.opacity(0.18)).blur(radius:12).padding(14))
+                    .shadow(color:lights.isOn ? accent.opacity(bloom ? 0.9 : 0.48) : .clear,radius:bloom ? 38 : 22)
+                    .scaleEffect(bloom ? 1.08 : 1)
+                    .onTapGesture {
+                        withAnimation(.spring(response:0.34,dampingFraction:0.58)) { bloom.toggle(); lights.togglePower() }
+                        UIImpactFeedbackGenerator(style:.medium).impactOccurred()
+                    }
+                    .accessibilityLabel(lights.isOn ? "Turn lights off" : "Turn lights on")
+                    .accessibilityAddTraits(.isButton)
+                Circle().fill(.white).frame(width:18,height:18).overlay(Circle().stroke(accent,lineWidth:4))
+                    .shadow(color:.white.opacity(0.75),radius:9)
+                    .offset(x:CGFloat(cos(hue*2*Double.pi))*(side*0.5-14),y:CGFloat(sin(hue*2*Double.pi))*(side*0.5-14))
+                    .allowsHitTesting(false)
+                Circle().stroke(.clear,lineWidth:0).contentShape(Circle())
+                    .gesture(DragGesture(minimumDistance:0).onChanged { value in
+                        let center=CGPoint(x:side/2,y:side/2)
+                        let dx=value.location.x-center.x,dy=value.location.y-center.y
+                        hue=(atan2(dy,dx)/(2*Double.pi)+1).truncatingRemainder(dividingBy:1)
+                        apply(Color(hue:hue,saturation:0.94,brightness:1))
+                        UISelectionFeedbackGenerator().selectionChanged()
+                    })
+                VStack(spacing:3) {
+                    Text(lights.isOn ? "ON" : "OFF").font(.system(size:12,weight:.bold,design:.rounded)).tracking(2)
+                    Text("TAP TO POWER").font(.system(size:9,weight:.medium,design:.rounded)).tracking(1.2).foregroundStyle(.white.opacity(0.56))
+                }.allowsHitTesting(false)
             }
-            Circle().fill(.white).frame(width:19,height:19).overlay(Circle().stroke(lights.currentColor,lineWidth:4))
-                .offset(x:CGFloat(cos(hue*2*Double.pi))*103,y:CGFloat(sin(hue*2*Double.pi))*103)
-                .shadow(color:.white.opacity(0.7),radius:8)
+            .frame(width:side,height:side)
+            .frame(maxWidth:.infinity,maxHeight:.infinity)
         }
-        .contentShape(Circle())
-        .gesture(DragGesture(minimumDistance:0).onChanged { v in
-            let dx=v.location.x-117.5,dy=v.location.y-117.5
-            let angle=atan2(dy,dx)/(2*Double.pi)
-            hue=(angle+1).truncatingRemainder(dividingBy:1)
-            let color=Color(hue:hue,saturation:0.92,brightness:1)
-            apply(color)
-            UISelectionFeedbackGenerator().selectionChanged()
-        })
-        .accessibilityLabel("Color wheel")
+        .frame(height:min(max(UIScreen.main.bounds.width-40,260),340))
+        .overlay(alignment:.bottom) {
+            Button {
+                UIPasteboard.general.string="#\(lights.rgbHex)"
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            } label: {
+                HStack(spacing:7) { RoundedRectangle(cornerRadius:3).fill(lights.currentColor).frame(width:11,height:11); Text("#\(lights.rgbHex)").font(.system(size:12,weight:.semibold,design:.rounded)).monospacedDigit(); Image(systemName:"doc.on.doc").font(.system(size:10)) }
+                    .padding(.horizontal,12).padding(.vertical,7).controlGlass(id:"hex-chip")
+            }.buttonStyle(.plain).offset(y:14)
+        }
+    }
+
+    private var controlPanel: some View {
+        VStack(spacing:16) {
+            HStack(spacing:12) {
+                Image(systemName:"sun.min").font(.system(size:14)).foregroundStyle(.white.opacity(0.65))
+                Slider(value:Binding(get:{lights.brightness},set:{lights.setBrightness($0)}),in:1...100)
+                    .tint(accent)
+                Image(systemName:"sun.max.fill").font(.system(size:14)).foregroundStyle(.white.opacity(0.85))
+                Text("\(Int(lights.brightness))%").font(.system(size:13,weight:.bold,design:.rounded)).monospacedDigit().frame(width:38,alignment:.trailing)
+            }
+            Rectangle().fill(.white.opacity(0.12)).frame(height:1)
+            VStack(spacing:8) {
+                HStack { Text("Temperature").font(.system(size:14,weight:.semibold,design:.rounded)); Spacer(); Text("\(Int(temperature))K").font(.system(size:12,weight:.semibold,design:.rounded)).monospacedDigit().foregroundStyle(.white.opacity(0.7)) }
+                TemperatureTrack(value:$temperature,thumb:accent)
+                HStack { Text("Warm").foregroundStyle(.orange); Spacer(); Text("Cool").foregroundStyle(.cyan) }.font(.system(size:10,weight:.medium,design:.rounded))
+            }
+        }
+        .padding(17)
+        .panelGlass()
+    }
+
+    private var colorsSection: some View {
+        let palette=uniquePalette(Array(favorites+recent))
+        return Group {
+            if !palette.isEmpty || !favorites.isEmpty {
+                VStack(alignment:.leading,spacing:11) {
+                    HStack {
+                        Text("Colors").font(.system(size:19,weight:.bold,design:.rounded))
+                        Spacer()
+                        Button {
+                            let color=lights.currentColor
+                            if !favorites.contains(where:{perceptuallyClose($0,color)}) { favorites.insert(color,at:0); favorites=Array(favorites.prefix(8)); persistState() }
+                            UIImpactFeedbackGenerator(style:.light).impactOccurred()
+                        } label: { Image(systemName:"plus").font(.system(size:14,weight:.bold)).frame(width:32,height:32).controlGlass(id:"save-color") }.buttonStyle(.plain)
+                    }
+                    ScrollView(.horizontal,showsIndicators:false) {
+                        HStack(spacing:12) {
+                            ForEach(Array(palette.enumerated()),id:\.offset) { index,color in
+                                Circle().fill(color.gradient).frame(width:38,height:38)
+                                    .overlay(Circle().stroke(.white.opacity(0.34),lineWidth:1))
+                                    .shadow(color:color.opacity(0.38),radius:8)
+                                    .contextMenu {
+                                        Button("Set as favorite",systemImage:"star.fill") { addFavorite(color) }
+                                        Button("Remove from favorites",systemImage:"star.slash") { favorites.removeAll{perceptuallyClose($0,color)}; persistState() }
+                                    }
+                                    .onTapGesture { apply(color) }
+                            }
+                        }.padding(.vertical,3)
+                    }
+                }
+            }
+        }
     }
 
     private var scenes: some View {
-        ScrollView(showsIndicators:false) {
-            VStack(alignment:.leading,spacing:18) {
-                pageHeader("Scenes","Thirty whole-strip looks, tuned to your room.")
-                ScrollView(.horizontal,showsIndicators:false) {
-                    HStack(spacing:8) { ForEach(categories,id:\.self) { category in
-                        Button(category) { selectedCategory=category }.font(.system(size:12,weight:.semibold))
-                            .padding(.horizontal,13).padding(.vertical,9)
-                            .glassSurface(corner:20,tint:selectedCategory == category ? .white.opacity(0.18) : .white.opacity(0.04),reduce:reduceTransparency)
-                    } }
-                }
-                LazyVGrid(columns:[GridItem(.flexible()),GridItem(.flexible())],spacing:13) {
-                    ForEach(visibleScenes) { scene in
-                        Button {
-                            selectedScene=scene
-                            startScene(scene)
-                            UIImpactFeedbackGenerator(style:.light).impactOccurred()
-                        } label: {
-                            VStack(alignment:.leading,spacing:10) {
-                                ZStack {
-                                    LinearGradient(colors:scene.colors + Array(scene.colors.reversed()),startPoint:.topLeading,endPoint:.bottomTrailing)
-                                    Circle().fill(.white.opacity(0.28)).frame(width:70).blur(radius:22).offset(x:35,y:-18)
-                                    Image(systemName:scene.symbol).font(.system(size:30,weight:.light)).foregroundStyle(.white).shadow(radius:12)
-                                }.frame(height:104).clipShape(RoundedRectangle(cornerRadius:18))
-                                HStack { Text(scene.name).font(.system(size:14,weight:.semibold)); Spacer(); if selectedScene?.id == scene.id { Image(systemName:"checkmark.circle.fill").foregroundStyle(.green) } }
-                                Text(scene.category.uppercased()).font(.system(size:9,weight:.bold)).tracking(1.2).foregroundStyle(.white.opacity(0.45))
-                            }.padding(10).glassSurface(corner:22,reduce:reduceTransparency)
-                        }.buttonStyle(.plain)
+        screen("Scenes") {
+            ScrollView(.horizontal,showsIndicators:false) {
+                HStack(spacing:8) {
+                    ForEach(categories,id:\.self) { category in
+                        Button(category) { selectedCategory=category }
+                            .font(.system(size:12,weight:.semibold,design:.rounded))
+                            .padding(.horizontal,13).padding(.vertical,8)
+                            .controlGlass(id:"category-\(category)",tint:selectedCategory == category ? accent.opacity(0.32) : .clear)
                     }
                 }
-                glassCard {
-                    VStack(alignment:.leading,spacing:12) {
-                        Text("Scene tuning").font(.system(size:17,weight:.semibold))
-                        HStack { Text("Speed"); Spacer(); Text("\(Int(sceneSpeed*100))%").monospacedDigit() }
-                        Slider(value:$sceneSpeed,in:0.05...1).tint(.cyan)
-                        HStack { Text("Brightness"); Spacer(); Text("\(Int(sceneBrightness))%").monospacedDigit() }
-                        Slider(value:$sceneBrightness,in:1...100).tint(.cyan)
-                        Text("These settings are stored for scene tuning. The current controller accepts whole-strip color and brightness commands; its documented BLE interface does not expose segments.")
-                            .font(.system(size:10)).foregroundStyle(.white.opacity(0.42))
-                    }
+            }
+            LazyVGrid(columns:[GridItem(.flexible(),spacing:12),GridItem(.flexible(),spacing:12)],spacing:12) {
+                ForEach(visibleScenes) { scene in
+                    sceneCard(scene)
                 }
-                Button { showDIY=true } label: { Label("Build a DIY scene",systemImage:"plus").frame(maxWidth:.infinity).padding(16).glassSurface(corner:20,tint:.cyan.opacity(0.16),reduce:reduceTransparency) }.buttonStyle(.plain)
-            }.padding(.horizontal,20).padding(.top,18).padding(.bottom,110)
+            }
+            Button { showDIY=true } label: {
+                Label("Create a scene",systemImage:"plus").font(.system(size:14,weight:.semibold,design:.rounded))
+                    .frame(maxWidth:.infinity).padding(.vertical,14).controlGlass(id:"create-scene",tint:accent.opacity(0.15))
+            }.buttonStyle(.plain)
         }
+    }
+
+    private func sceneCard(_ scene:LEDScene)->some View {
+        let active=selectedScene?.id == scene.id
+        return Button {
+            selectedScene=scene
+            sceneSpeed=scene.speed
+            startScene(scene)
+            UIImpactFeedbackGenerator(style:.light).impactOccurred()
+        } label: {
+            ZStack(alignment:.topLeading) {
+                TimelineView(.animation(minimumInterval:reduceMotion ? 1 : 0.08,paused:reduceMotion)) { timeline in
+                    let phase=timeline.date.timeIntervalSinceReferenceDate*(0.18+scene.speed*0.28)
+                    let colors=scene.colors.isEmpty ? [.black] : scene.colors
+                    let rotated=colors.enumerated().sorted{($0.offset+Int(phase*10))%colors.count < ($1.offset+Int(phase*10))%colors.count}.map{$0.element}
+                    LinearGradient(colors:rotated+Array(rotated.reversed()),startPoint:.topLeading,endPoint:.bottomTrailing)
+                        .overlay(alignment:.bottomTrailing) {
+                            Circle().fill(.white.opacity(0.22)).frame(width:70,height:70).blur(radius:24).offset(x:15,y:20)
+                        }
+                }
+                Image(systemName:scene.symbol).font(.system(size:15,weight:.semibold)).foregroundStyle(.white).padding(11)
+                    .shadow(color:.black.opacity(0.45),radius:5)
+                VStack { Spacer(); HStack {
+                    Text(scene.name).font(.system(size:13,weight:.semibold,design:.rounded)).lineLimit(1)
+                    Spacer(minLength:2)
+                    if active { Image(systemName:"waveform").font(.system(size:11,weight:.bold)) }
+                }.padding(.horizontal,11).padding(.vertical,9).background(.ultraThinMaterial,in:Capsule()).padding(8) }
+            }
+            .aspectRatio(1.3,contentMode:.fit)
+            .clipShape(RoundedRectangle(cornerRadius:20,style:.continuous))
+            .overlay(RoundedRectangle(cornerRadius:20,style:.continuous).stroke(active ? accent : .white.opacity(0.13),lineWidth:active ? 2.5 : 1))
+            .shadow(color:active ? accent.opacity(0.45) : .clear,radius:14)
+        }.buttonStyle(.plain)
+    }
+
+    private var sceneDock: some View {
+        HStack(spacing:12) {
+            Image(systemName:selectedScene?.symbol ?? "sparkles").font(.system(size:16,weight:.semibold)).foregroundStyle(accent)
+            VStack(alignment:.leading,spacing:2) {
+                Text(selectedScene?.name ?? "Scene").font(.system(size:13,weight:.semibold,design:.rounded)).lineLimit(1)
+                Text("WHOLE STRIP").font(.system(size:9,weight:.medium,design:.rounded)).tracking(1).foregroundStyle(.white.opacity(0.55))
+            }
+            Spacer()
+            Button { showScenePlayer=true } label: { Image(systemName:"slider.horizontal.3").frame(width:34,height:34).controlGlass(id:"scene-settings") }.buttonStyle(.plain)
+            Button { stopScene() } label: { Image(systemName:"stop.fill").frame(width:34,height:34).controlGlass(id:"scene-stop") }.buttonStyle(.plain)
+        }.padding(10).panelGlass()
+    }
+
+    private var scenePlayerSheet: some View {
+        VStack(alignment:.leading,spacing:20) {
+            HStack { Text(selectedScene?.name ?? "Scene").font(.system(size:24,weight:.bold,design:.rounded)); Spacer(); Button("Done"){showScenePlayer=false} }
+            HStack { Text("Speed"); Spacer(); Text("\(Int(sceneSpeed*100))%").monospacedDigit() }
+            Slider(value:$sceneSpeed,in:0.05...1).tint(accent)
+            HStack { Text("Brightness"); Spacer(); Text("\(Int(sceneBrightness))%").monospacedDigit() }
+            Slider(value:$sceneBrightness,in:1...100).tint(accent)
+            Button("Stop scene",systemImage:"stop.fill",role:.destructive) { stopScene(); showScenePlayer=false }
+                .buttonStyle(.glass)
+        }.padding(24).presentationBackground(.ultraThinMaterial)
     }
 
     private var music: some View {
-        ScrollView(showsIndicators:false) {
-            VStack(alignment:.leading,spacing:18) {
-                pageHeader("Music","Let nearby sound move your lights.")
-                glassCard {
-                    VStack(alignment:.leading,spacing:15) {
-                        HStack { Label("Microphone input",systemImage:"mic.fill").font(.system(size:16,weight:.semibold)); Spacer(); Circle().fill(audio.isRunning ? .green : .gray).frame(width:8,height:8) }
-                        Text(audio.message).font(.system(size:12)).foregroundStyle(.white.opacity(0.58))
-                        HStack(spacing:8) {
-                            bandBar("BASS",value:audio.bass,color:.orange)
-                            bandBar("MID",value:audio.mid,color:.cyan)
-                            bandBar("HIGH",value:audio.high,color:.purple)
-                        }.frame(height:115)
-                        Button { audio.isRunning ? audio.stop() : audio.start() } label: {
-                            Label(audio.isRunning ? "Stop listening" : "Enable microphone",systemImage:audio.isRunning ? "stop.fill" : "mic.fill")
-                                .frame(maxWidth:.infinity).padding(14).glassSurface(corner:18,tint:.cyan.opacity(0.18),reduce:reduceTransparency)
-                        }.buttonStyle(.plain)
-                    }
-                }
-                VStack(alignment:.leading,spacing:10) {
-                    Text("Mode").font(.system(size:16,weight:.semibold))
-                    LazyVGrid(columns:[GridItem(.flexible()),GridItem(.flexible())],spacing:9) {
-                        ForEach(["Rhythm","Energic","Spectrum","Rolling"],id:\.self) { m in
-                            Button(m) { musicMode=m; UIImpactFeedbackGenerator(style:.light).impactOccurred() }
-                                .padding(14).frame(maxWidth:.infinity).glassSurface(corner:18,tint:musicMode == m ? .cyan.opacity(0.22) : .white.opacity(0.05),reduce:reduceTransparency).buttonStyle(.plain)
+        screen("Music") {
+            VStack(spacing:20) {
+                visualizer
+                Button {
+                    if audio.isRunning { audio.stop(); stopScene() }
+                    else { audio.start() }
+                } label: {
+                    Label(audio.isRunning ? "Stop listening" : "Start listening",systemImage:audio.isRunning ? "stop.fill" : "mic.fill")
+                        .font(.system(size:16,weight:.bold,design:.rounded))
+                        .frame(maxWidth:.infinity).padding(.vertical,17)
+                        .controlGlass(id:"music-primary",tint:accent.opacity(0.42))
+                }.buttonStyle(.plain)
+                VStack(alignment:.leading,spacing:14) {
+                    Text("Mode").font(.system(size:14,weight:.semibold,design:.rounded))
+                    GlassEffectContainer(spacing:4) {
+                        HStack(spacing:4) {
+                            ForEach(["Rhythm","Energic","Spectrum","Rolling"],id:\.self) { mode in
+                                Button(mode) { musicMode=mode; UISelectionFeedbackGenerator().selectionChanged() }
+                                    .font(.system(size:11,weight:.semibold,design:.rounded))
+                                    .frame(maxWidth:.infinity).padding(.vertical,11)
+                                    .background {
+                                        if musicMode == mode {
+                                            Capsule().fill(accent.opacity(0.35)).glassEffect(.regular.tint(accent.opacity(0.35)).interactive()).glassEffectID("music-\(mode)",in:glassSpace)
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                            }
                         }
                     }
-                    HStack { Text("Sensitivity"); Spacer(); Text("\(Int(sensitivity*100))%") }
-                    Slider(value:$sensitivity,in:0.1...1).tint(.cyan)
-                }.padding(18).glassSurface(corner:24,reduce:reduceTransparency)
-                Text("Audio is analyzed from the phone microphone, not captured directly from Apple Music or other apps. This controller has one whole-strip RGB command. Music effects are throttled and cannot create true per-pixel spectrum output.")
-                    .font(.system(size:11)).foregroundStyle(.white.opacity(0.43))
-            }.padding(.horizontal,20).padding(.top,18).padding(.bottom,110)
-        }.onChange(of:audio.bass) { _, level in
-            guard audio.isRunning, lights.connectedName != nil else { return }
-            let v=min(1,level*sensitivity*2.8)
-            let color:Color
-            switch musicMode {
-            case "Energic": color=Color(hue:(0.02+v*0.45).truncatingRemainder(dividingBy:1),saturation:1,brightness:0.35+v*0.65)
-            case "Spectrum": color=Color(hue:(0.58+v*0.38).truncatingRemainder(dividingBy:1),saturation:0.95,brightness:0.3+v*0.7)
-            case "Rolling": color=Color(hue:(0.7+v*0.22).truncatingRemainder(dividingBy:1),saturation:0.8,brightness:0.35+v*0.65)
-            default: color=Color(hue:0.56,saturation:0.9,brightness:0.12+v*0.88)
+                    HStack { Text("Sensitivity"); Spacer(); Text("\(Int(sensitivity*100))%").monospacedDigit() }
+                        .font(.system(size:13,weight:.medium,design:.rounded))
+                    Slider(value:$sensitivity,in:0.1...1).tint(accent)
+                }.padding(17).panelGlass()
+                Text(audio.message).font(.system(size:12,weight:.medium,design:.rounded)).foregroundStyle(.white.opacity(0.58)).frame(maxWidth:.infinity,alignment:.leading)
             }
-            applyThrottled(color)
-        }.onDisappear { audio.stop() }
+        }
+        .onChange(of:audio.bass) { _, _ in updateMusicColor() }
+        .onChange(of:audio.mid) { _, _ in updateMusicColor() }
+        .onChange(of:audio.high) { _, _ in updateMusicColor() }
+        .onDisappear { audio.stop() }
+    }
+
+    private var visualizer: some View {
+        TimelineView(.animation(minimumInterval:0.05,paused:reduceMotion && !audio.isRunning)) { timeline in
+            let phase=timeline.date.timeIntervalSinceReferenceDate
+            let levels=(0..<32).map { i -> CGFloat in
+                let idle=0.12+0.07*sin(phase*1.7+Double(i)*0.55)
+                let active=audio.isRunning ? 0.08+audio.bass*CGFloat(0.75)+audio.mid*CGFloat(0.55)*CGFloat(abs(sin(Double(i)*0.4)))+audio.high*CGFloat(0.4)*CGFloat(abs(cos(Double(i)*0.8))) : idle
+                return max(0.08,min(1,active))
+            }
+            HStack(alignment:.center,spacing:4) {
+                ForEach(0..<32,id:\.self) { i in
+                    Capsule().fill(LinearGradient(colors:[accent.opacity(0.55),accent,.white.opacity(0.88)],startPoint:.bottom,endPoint:.top))
+                        .frame(maxWidth:.infinity).frame(height:max(8,150*levels[i]))
+                        .shadow(color:accent.opacity(0.35),radius:4)
+                }
+            }.frame(height:156).padding(.horizontal,5)
+        }
+        .padding(18).frame(maxWidth:.infinity)
+        .panelGlass()
     }
 
     private var timersPage: some View {
-        ScrollView(showsIndicators:false) {
-            VStack(alignment:.leading,spacing:18) {
-                pageHeader("Timers","Schedules need the app awake unless your controller has native timer support.")
-                glassCard {
-                    VStack(alignment:.leading,spacing:14) {
-                        Label("Sleep fade",systemImage:"moon.zzz.fill").font(.system(size:17,weight:.semibold))
-                        HStack { Text("Fade duration"); Spacer(); Text("\(Int(timers.sleepMinutes)) min") }
-                        Slider(value:$timers.sleepMinutes,in:15...180,step:5).tint(.indigo)
-                        Button("Start sleep fade") {
-                            timers.sleepFade(brightness:{lights.setBrightness($0)},powerOff:{ if lights.isOn { lights.togglePower() } })
-                        }.buttonStyle(.glass).disabled(lights.connectedName == nil)
-                        if timers.enabled { Button("Cancel timer",role:.destructive) { timers.cancel() } }
+        screen("Timers") {
+            VStack(spacing:14) {
+                VStack(alignment:.leading,spacing:16) {
+                    HStack { Text("Next routine").font(.system(size:14,weight:.semibold,design:.rounded)); Spacer(); Text(timers.enabled ? "ACTIVE" : "READY").font(.system(size:10,weight:.bold,design:.rounded)).tracking(1).foregroundStyle(timers.enabled ? accent : .white.opacity(0.5)) }
+                    DatePicker("Time",selection:$timerDate,displayedComponents:.hourAndMinute)
+                        .datePickerStyle(.compact).font(.system(size:17,weight:.semibold,design:.rounded))
+                    HStack(spacing:10) {
+                        timerTile("Sunrise","sunrise.fill",.orange) {
+                            timers.scheduleWake(at:timerDate,brightness:{lights.setBrightness($0)},powerOn:{if !lights.isOn {lights.togglePower()}})
+                        }
+                        timerTile("Sunset","sunset.fill",.purple) {
+                            timers.sleepFade(brightness:{lights.setBrightness($0)},powerOff:{if lights.isOn {lights.togglePower()}})
+                        }
+                        timerTile("Sleep","moon.zzz.fill",.indigo) {
+                            timers.sleepFade(brightness:{lights.setBrightness($0)},powerOff:{if lights.isOn {lights.togglePower()}})
+                        }
                     }
-                }
-                glassCard {
-                    VStack(alignment:.leading,spacing:14) {
-                        Label("Sunrise wake-up",systemImage:"sunrise.fill").font(.system(size:17,weight:.semibold))
-                        HStack { Text("Gradual brighten"); Spacer(); Text("\(Int(timers.wakeMinutes)) min") }
-                        Slider(value:$timers.wakeMinutes,in:15...30,step:1).tint(.orange)
-                        DatePicker("Wake time",selection:$timerDate,displayedComponents:.hourAndMinute).tint(.orange)
-                        Button("Schedule sunrise") {
-                            timers.scheduleWake(at: timerDate, brightness:{lights.setBrightness($0)}, powerOn:{ if !lights.isOn { lights.togglePower() } })
-                        }.buttonStyle(.glass).disabled(lights.connectedName == nil)
-                        if timers.enabled { Button("Cancel timer",role:.destructive) { timers.cancel() } }
-                    }
-                }
-                glassCard {
-                    VStack(alignment:.leading,spacing:12) {
-                        Label("Weekly schedules",systemImage:"calendar").font(.system(size:17,weight:.semibold))
-                        Text("Shortcuts alternative · use an Open URLs action in a personal automation:")
-                        VStack(alignment:.leading,spacing:5) {
-                            Text("morgsled://power/on")
-                            Text("morgsled://power/off")
-                            Text("morgsled://brightness?value=40")
-                            Text("morgsled://color?hex=FF00AA")
-                        }.font(.system(size:11,weight:.medium,design:.monospaced)).foregroundStyle(.cyan)
-                        Text("A saved time cannot wake a suspended app to send Bluetooth commands. A personal Shortcut can open the app with one of these commands at a scheduled time; iOS may still require the phone to be unlocked and Bluetooth connected.")
-                            .font(.system(size:12)).foregroundStyle(.white.opacity(0.55))
-                        Text(timers.message).font(.system(size:11)).foregroundStyle(.orange.opacity(0.85))
-                    }
-                }
-            }.padding(.horizontal,20).padding(.top,18).padding(.bottom,110)
+                    HStack { Text("Fade duration"); Spacer(); Text("\(Int(timers.sleepMinutes)) min").monospacedDigit() }
+                    Slider(value:$timers.sleepMinutes,in:5...180,step:5).tint(accent)
+                    HStack { Text("Wake ramp"); Spacer(); Text("\(Int(timers.wakeMinutes)) min").monospacedDigit() }
+                    Slider(value:$timers.wakeMinutes,in:5...60,step:1).tint(accent)
+                    if timers.enabled { Button("Cancel active timer",role:.destructive) { timers.cancel() }.buttonStyle(.glass) }
+                    Text(timers.message).font(.system(size:11,weight:.medium,design:.rounded)).foregroundStyle(.white.opacity(0.55))
+                }.padding(18).panelGlass()
+            }
         }
+    }
+
+    private func timerTile(_ title:String,_ symbol:String,_ tint:Color,_ action:@escaping()->Void)->some View {
+        Button {
+            guard lights.connectedName != nil else { showingDevices=true; return }
+            action()
+            UIImpactFeedbackGenerator(style:.medium).impactOccurred()
+        } label: {
+            VStack(spacing:8) {
+                Image(systemName:symbol).font(.system(size:19,weight:.semibold))
+                Text(title).font(.system(size:11,weight:.semibold,design:.rounded))
+            }.frame(maxWidth:.infinity).padding(.vertical,13)
+                .controlGlass(id:"timer-\(title)",tint:tint.opacity(0.28))
+        }.buttonStyle(.plain)
+    }
+
+    private var infoSheet: some View {
+        NavigationStack {
+            List {
+                Section("Your LED strip") {
+                    Text("This controller sends whole-strip RGB and brightness commands. It does not address independent segments or pixels.")
+                    Text("Temperature is an RGB approximation. The hardware protocol exposed by this strip does not provide a separate white-temperature channel.")
+                }
+                Section("Music") {
+                    Text("Music mode listens through the iPhone microphone. It cannot capture protected audio directly from Apple Music or other apps. Frequency bands are mapped into one whole-strip color.")
+                }
+                Section("Timers") {
+                    Text("iOS may suspend the app in the background. Sunrise, sunset, and sleep routines need Morg’s LED to remain open and Bluetooth connected; a closed app cannot reliably send scheduled BLE commands.")
+                }
+                Section("Accessibility") {
+                    Text("Reduce Motion pauses decorative animation. Reduce Transparency uses a higher-contrast fallback surface. Layouts scroll vertically and respect Dynamic Type.")
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.black.opacity(0.72))
+            .navigationTitle("About controls")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement:.topBarTrailing) { Button("Done"){showingInfo=false} } }
+        }.preferredColorScheme(.dark)
     }
 
     private var diySheet: some View {
         NavigationStack {
             Form {
-                Section("Scene") { TextField("Scene name",text:$diyName); Picker("Motion",selection:$diyMode) { ForEach(modes,id:\.self){Text($0)} }; HStack { Text("Speed"); Slider(value:$diySpeed,in:0.05...1) } }
+                Section("Scene") {
+                    TextField("Scene name",text:$diyName)
+                    Picker("Motion",selection:$diyMode) { ForEach(modes,id:\.self){Text($0)} }
+                    HStack { Text("Speed"); Slider(value:$diySpeed,in:0.05...1) }
+                }
                 Section("Colors · 2 to 6") {
                     ForEach(diyColors.indices,id:\.self) { i in ColorPicker("Color \(i+1)",selection:$diyColors[i],supportsOpacity:false) }
-                    if diyColors.count < 6 { Button("Add color") { diyColors.append(.pink) } }
-                    if diyColors.count > 2 { Button("Remove last color",role:.destructive) { diyColors.removeLast() } }
+                    if diyColors.count < 6 { Button("Add color"){diyColors.append(.pink)} }
+                    if diyColors.count > 2 { Button("Remove last color",role:.destructive){diyColors.removeLast()} }
                 }
-                Section { Button("Save DIY scene") {
+                Section { Button("Save scene") {
                     let scene=LEDScene(id:UUID().uuidString,name:diyName.isEmpty ? "My scene" : diyName,category:"DIY",symbol:"wand.and.stars",colors:diyColors,motion:diyMode,speed:diySpeed)
                     diySaved.append(scene); selectedScene=scene; persistScenes(); startScene(scene); showDIY=false
                 } }
-            }.scrollContentBackground(.hidden).background(Color.black.opacity(0.86)).navigationTitle("Scene builder").navigationBarTitleDisplayMode(.inline)
+            }.scrollContentBackground(.hidden).background(Color.black.opacity(0.88))
+                .navigationTitle("Create scene").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement:.topBarTrailing){Button("Done"){showDIY=false}} }
         }.preferredColorScheme(.dark)
     }
@@ -324,140 +479,259 @@ struct ContentView: View {
     private var deviceSheet: some View {
         NavigationStack {
             List {
-                if lights.devices.isEmpty { Text(lights.status).foregroundStyle(.secondary); Text("Power on the strip and keep it nearby.").font(.caption).foregroundStyle(.secondary) }
+                Section {
+                    HStack { Circle().fill(lights.isPoweredOn ? .green : .orange).frame(width:8,height:8); Text(lights.status).font(.system(size:13,weight:.medium,design:.rounded)) }
+                }
                 ForEach(lights.devices,id:\.identifier) { device in
                     Button { lights.connect(device); showingDevices=false } label: {
-                        VStack(alignment:.leading) { Text(device.name ?? "Bluetooth LED"); Text(device.identifier.uuidString).font(.caption2).foregroundStyle(.secondary) }
+                        HStack {
+                            Image(systemName:"lightbulb.led").foregroundStyle(accent)
+                            VStack(alignment:.leading,spacing:3) {
+                                Text(device.name ?? "Bluetooth LED").font(.system(size:14,weight:.semibold,design:.rounded))
+                                Text(device.identifier.uuidString).font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if device.identifier.uuidString == lights.rememberedDeviceID { Image(systemName:"checkmark.circle.fill").foregroundStyle(.green) }
+                        }
                     }
                 }
-            }.navigationTitle("Choose LED").toolbar {
+            }
+            .scrollContentBackground(.hidden).background(Color.black.opacity(0.78))
+            .navigationTitle("LED device").navigationBarTitleDisplayMode(.inline)
+            .toolbar {
                 ToolbarItem(placement:.topBarLeading){Button("Done"){showingDevices=false}}
-                ToolbarItem(placement:.topBarTrailing){Button("Scan"){lights.scan()}}
+                ToolbarItem(placement:.topBarTrailing){Button("Scan",systemImage:"arrow.clockwise"){lights.scan()}}
             }
         }.preferredColorScheme(.dark)
     }
 
-    private var visibleScenes: [LEDScene] { (selectedCategory == "All" ? LEDScene.library : LEDScene.library.filter{$0.category == selectedCategory}) + diySaved }
-    private func pageHeader(_ title:String,_ subtitle:String)->some View {
-        VStack(alignment:.leading,spacing:5) { HStack { Text("MORG’S LED").font(.system(size:10,weight:.bold)).tracking(2).foregroundStyle(.white.opacity(0.5)); Spacer(); statusPill }; Text(title).font(.system(size:32,weight:.bold,design:.rounded)); Text(subtitle).font(.system(size:12)).foregroundStyle(.white.opacity(0.5)) }.frame(maxWidth:.infinity,alignment:.leading)
+    private var scenePlayerSheet: some View {
+        VStack(alignment:.leading,spacing:18) {
+            HStack { Text(selectedScene?.name ?? "Scene").font(.system(size:24,weight:.bold,design:.rounded)); Spacer(); Button("Done"){showScenePlayer=false} }
+            HStack { Text("Speed"); Spacer(); Text("\(Int(sceneSpeed*100))%").monospacedDigit() }
+            Slider(value:$sceneSpeed,in:0.05...1).tint(accent)
+            HStack { Text("Brightness"); Spacer(); Text("\(Int(sceneBrightness))%").monospacedDigit() }
+            Slider(value:$sceneBrightness,in:1...100).tint(accent)
+            Button("Stop scene",systemImage:"stop.fill",role:.destructive){stopScene();showScenePlayer=false}.buttonStyle(.glass)
+        }.padding(24).presentationBackground(.ultraThinMaterial)
     }
-    private func glassCard<Content:View>(@ViewBuilder _ content:()->Content)->some View { content().padding(18).glassSurface(corner:26,reduce:reduceTransparency) }
-    private func colorStrip(title:String,colors:[Color])->some View {
-        VStack(alignment:.leading,spacing:10) { Text(title).font(.system(size:13,weight:.semibold)).foregroundStyle(.white.opacity(0.7)); ScrollView(.horizontal,showsIndicators:false) { HStack(spacing:12) { ForEach(Array(colors.enumerated()),id:\.offset) { _,color in Circle().fill(color.gradient).frame(width:36,height:36).overlay(Circle().stroke(.white.opacity(0.28),lineWidth:1)).onTapGesture { apply(color) }.onLongPressGesture { if favorites.contains(color) { favorites.removeAll{$0 == color} } else { favorites.insert(color,at:0) }; persistState() } } } } }
+
+    private var visibleScenes:[LEDScene] {
+        let all=LEDScene.library+diySaved
+        return selectedCategory == "All" ? all : all.filter{$0.category == selectedCategory}
     }
-    private func bandBar(_ title:String,value:Double,color:Color)->some View {
-        VStack(spacing:8) { GeometryReader { geo in VStack { Spacer(minLength:0); Capsule().fill(color.gradient).frame(height:max(4,geo.size.height*min(1,value*2.8))) } }.frame(maxWidth:.infinity); Text(title).font(.system(size:9,weight:.bold)).tracking(1).foregroundStyle(.white.opacity(0.55)) }.frame(maxWidth:.infinity).padding(10).glassSurface(corner:16,reduce:reduceTransparency)
+
+    private func controlGlass(id:String,tint:Color = .clear)->some View {
+        Group {
+            if #available(iOS 26.0, *), !reduceTransparency {
+                Capsule().fill(.clear).overlay(Capsule().fill(tint.opacity(0.18))).glassEffect(.regular.tint(tint).interactive()).glassEffectID(id,in:glassSpace)
+            } else {
+                Capsule().fill(Color.white.opacity(0.12)).overlay(Capsule().stroke(.white.opacity(0.18),lineWidth:1))
+            }
+        }
     }
+
+    private func panelGlass()->some View {
+        Group {
+            if #available(iOS 26.0, *), !reduceTransparency {
+                RoundedRectangle(cornerRadius:24,style:.continuous).fill(.clear)
+                    .glassEffect(.regular,in:.rect(cornerRadius:24))
+                    .overlay(RoundedRectangle(cornerRadius:24,style:.continuous).stroke(.white.opacity(0.12),lineWidth:0.7))
+            } else {
+                RoundedRectangle(cornerRadius:24,style:.continuous).fill(.black.opacity(0.58))
+                    .overlay(RoundedRectangle(cornerRadius:24,style:.continuous).stroke(.white.opacity(0.18),lineWidth:1))
+            }
+        }
+    }
+
     private func apply(_ color:Color) {
-        let ui=UIColor(color); var r:CGFloat=0,g:CGFloat=0,b:CGFloat=0,a:CGFloat=0
-        ui.getRed(&r,green:&g,blue:&b,alpha:&a)
-        lights.setColor(red:Double(r),green:Double(g),blue:Double(b))
-        if !recent.contains(color) { recent.insert(color,at:0); recent=Array(recent.prefix(8)) }
-        persistState()
+        let rgb=color.rgb
+        lights.setColor(red:rgb.x,green:rgb.y,blue:rgb.z)
+        addRecent(color)
     }
+
+    private func addRecent(_ color:Color) {
+        if !recent.contains(where:{perceptuallyClose($0,color)}) {
+            recent.insert(color,at:0); recent=Array(recent.prefix(8)); persistState()
+        }
+    }
+
+    private func addFavorite(_ color:Color) {
+        favorites.removeAll{perceptuallyClose($0,color)}
+        favorites.insert(color,at:0); favorites=Array(favorites.prefix(8)); persistState()
+    }
+
+    private func uniquePalette(_ input:[Color])->[Color] {
+        var result:[Color]=[]
+        for color in input where !result.contains(where:{perceptuallyClose($0,color)}) {
+            result.append(color)
+            if result.count == 8 { break }
+        }
+        return result
+    }
+
+    private func perceptuallyClose(_ a:Color,_ b:Color)->Bool {
+        let x=a.oklab,y=b.oklab
+        let dl=x.x-y.x,da=x.y-y.y,db=x.z-y.z
+        return sqrt(dl*dl+da*da+db*db)<0.075
+    }
+
+    private func startScene(_ scene:LEDScene) {
+        sceneTask?.cancel()
+        guard !scene.colors.isEmpty else { return }
+        lights.setBrightness(sceneBrightness)
+        let speed=scene.category == "DIY" ? scene.speed : sceneSpeed
+        let interval=max(0.14,2.0-speed*1.75)
+        sceneTask=Task { @MainActor in
+            var index=0
+            while !Task.isCancelled {
+                let base=scene.colors[index%scene.colors.count]
+                let next=scene.colors[(index+1)%scene.colors.count]
+                let color:Color
+                switch scene.motion {
+                case "Rainbow": color=Color(hue:Double(index%24)/24,saturation:0.95,brightness:1)
+                case "Strobe": color=index%2 == 0 ? base : .black
+                case "Candle flicker": color=index%4 == 0 ? base.opacity(0.55) : base
+                case "Pulse","Breathe": color=base.opacity(index%2 == 0 ? 1 : 0.42)
+                case "Aurora": color=ColorScience.mixColor(base,next,t:0.5)
+                default: color=ColorScience.mixColor(base,next,t:0.5)
+                }
+                apply(color)
+                index += 1
+                do { try await Task.sleep(for:.seconds(scene.motion == "Strobe" ? max(0.12,interval/3) : interval)) } catch { return }
+            }
+        }
+    }
+
+    private func restartScene() { if let scene=selectedScene { startScene(scene) } }
+    private func stopScene() { sceneTask?.cancel(); sceneTask=nil; selectedScene=nil }
+
+    private func updateMusicColor() {
+        guard audio.isRunning,lights.connectedName != nil else { return }
+        let bass=min(1,audio.bass*sensitivity*3.0)
+        let mid=min(1,audio.mid*sensitivity*3.0)
+        let high=min(1,audio.high*sensitivity*3.0)
+        let h:Double
+        switch musicMode {
+        case "Energic": h=(0.02+bass*0.42).truncatingRemainder(dividingBy:1)
+        case "Spectrum": h=(0.56+mid*0.34+high*0.1).truncatingRemainder(dividingBy:1)
+        case "Rolling": h=(0.72+bass*0.18+mid*0.1).truncatingRemainder(dividingBy:1)
+        default: h=0.56
+        }
+        let brightness=0.18+bass*0.58+mid*0.18+high*0.06
+        applyThrottled(Color(hue:h,saturation:0.94,brightness:brightness))
+    }
+
+    private var lastAudioWrite=0.0
+    private func applyThrottled(_ color:Color) {
+        let now=Date().timeIntervalSinceReferenceDate
+        guard now-lastAudioWrite>=0.04 else { return }
+        lastAudioWrite=now; apply(color)
+    }
+
     private func handleAutomationURL(_ url:URL) {
         guard url.scheme == "morgsled" else { return }
         switch url.host?.lowercased() {
         case "power":
-            if url.path.lowercased() == "/on", !lights.isOn { lights.togglePower() }
-            if url.path.lowercased() == "/off", lights.isOn { lights.togglePower() }
+            if url.path.lowercased() == "/on",!lights.isOn { lights.togglePower() }
+            if url.path.lowercased() == "/off",lights.isOn { lights.togglePower() }
         case "brightness":
-            if let value=URLComponents(url:url,resolvingAgainstBaseURL:false)?.queryItems?.first(where:{$0.name == "value"})?.value,
-               let amount=Double(value), (0...100).contains(amount) { lights.setBrightness(amount) }
+            if let value=URLComponents(url:url,resolvingAgainstBaseURL:false)?.queryItems?.first(where:{$0.name=="value"})?.value,let amount=Double(value),(0...100).contains(amount) { lights.setBrightness(amount) }
         case "color":
-            if let hex=URLComponents(url:url,resolvingAgainstBaseURL:false)?.queryItems?.first(where:{$0.name == "hex"})?.value {
-                let cleaned=hex.trimmingCharacters(in:CharacterSet(charactersIn:"#"))
-                if cleaned.count == 6, let value=UInt32(cleaned,radix:16) {
-                    lights.setColor(red:Double((value >> 16) & 255)/255,green:Double((value >> 8) & 255)/255,blue:Double(value & 255)/255)
-                }
+            if let hex=URLComponents(url:url,resolvingAgainstBaseURL:false)?.queryItems?.first(where:{$0.name=="hex"})?.value {
+                let clean=hex.trimmingCharacters(in:CharacterSet(charactersIn:"#"))
+                if clean.count==6,let value=UInt32(clean,radix:16) { lights.setColor(red:Double((value>>16)&255)/255,green:Double((value>>8)&255)/255,blue:Double(value&255)/255) }
             }
         default: break
         }
     }
-    private func applyThrottled(_ color:Color) {
-        guard Date().timeIntervalSinceReferenceDate - lastAudioWrite >= 0.04 else { return }
-        lastAudioWrite=Date().timeIntervalSinceReferenceDate; apply(color)
-    }
-    @State private var lastAudioWrite = 0.0
+
     private func restoreState() {
         if let data=UserDefaults.standard.data(forKey:"morgs.recent"),let values=try? JSONDecoder().decode([RGBA].self,from:data) { recent=values.map{$0.color} }
         if let data=UserDefaults.standard.data(forKey:"morgs.favorites"),let values=try? JSONDecoder().decode([RGBA].self,from:data) { favorites=values.map{$0.color} }
         if let data=UserDefaults.standard.data(forKey:"morgs.diy-scenes"),let values=try? JSONDecoder().decode([SavedScene].self,from:data) {
-            diySaved=values.map { LEDScene(id:$0.id,name:$0.name,category:"DIY",symbol:"wand.and.stars",colors:$0.colors.map{$0.color},motion:$0.motion,speed:$0.speed) }
+            diySaved=values.map{LEDScene(id:$0.id,name:$0.name,category:"DIY",symbol:"wand.and.stars",colors:$0.colors.map{$0.color},motion:$0.motion,speed:$0.speed)}
         }
     }
+
     private func persistScenes() {
-        let values=diySaved.map { SavedScene(id:$0.id,name:$0.name,colors:$0.colors.map{RGBA(color:$0)},motion:$0.motion,speed:$0.speed) }
+        let values=diySaved.map{SavedScene(id:$0.id,name:$0.name,colors:$0.colors.map{RGBA(color:$0)},motion:$0.motion,speed:$0.speed)}
         UserDefaults.standard.set(try? JSONEncoder().encode(values),forKey:"morgs.diy-scenes")
     }
-    private func startScene(_ scene:LEDScene) {
-        sceneTask?.cancel()
-        guard !scene.colors.isEmpty else { apply(.white); return }
-        lights.setBrightness(sceneBrightness)
-        let selectedSpeed = scene.category == "DIY" ? scene.speed : sceneSpeed
-        let interval=max(0.12,2.2-(selectedSpeed*1.9))
-        sceneTask=Task { @MainActor in
-            var index=0
-            while !Task.isCancelled {
-                let color:Color
-                switch scene.motion {
-                case "Rainbow":
-                    color=Color(hue:Double(index % 24)/24.0,saturation:0.95,brightness:1)
-                case "Strobe":
-                    color=index % 2 == 0 ? scene.colors[index % scene.colors.count] : .black
-                case "Candle flicker":
-                    color=index % 4 == 0 ? scene.colors[index % scene.colors.count].opacity(0.58) : scene.colors[index % scene.colors.count]
-                case "Pulse","Breathe":
-                    color=scene.colors[index % scene.colors.count].opacity(index % 2 == 0 ? 1 : 0.48)
-                default:
-                    color=scene.colors[index % scene.colors.count]
-                }
-                apply(color)
-                index += 1
-                do { try await Task.sleep(for:.seconds(scene.motion == "Strobe" ? max(0.12,interval/3) : interval)) }
-                catch { return }
-            }
-        }
-    }
+
     private func persistState() {
-        let r=recent.map{RGBA(color:$0)},f=favorites.map{RGBA(color:$0)}
-        UserDefaults.standard.set(try? JSONEncoder().encode(r),forKey:"morgs.recent")
-        UserDefaults.standard.set(try? JSONEncoder().encode(f),forKey:"morgs.favorites")
+        UserDefaults.standard.set(try? JSONEncoder().encode(recent.map{RGBA(color:$0)}),forKey:"morgs.recent")
+        UserDefaults.standard.set(try? JSONEncoder().encode(favorites.map{RGBA(color:$0)}),forKey:"morgs.favorites")
     }
 }
 
-private struct SavedScene: Codable {
-    var id:String
-    var name:String
-    var colors:[RGBA]
-    var motion:String
-    var speed:Double
+private struct TemperatureTrack:View {
+    @Binding var value:Double
+    let thumb:Color
+    var body:some View {
+        GeometryReader { geo in
+            ZStack(alignment:.leading) {
+                Capsule().fill(LinearGradient(colors:[Color(red:1,green:0.38,blue:0.12),.orange,.white,.cyan,Color(red:0.15,green:0.42,blue:1)],startPoint:.leading,endPoint:.trailing)).frame(height:8)
+                Circle().fill(thumb).frame(width:22,height:22).overlay(Circle().stroke(.white.opacity(0.85),lineWidth:2)).shadow(color:thumb.opacity(0.6),radius:8)
+                    .offset(x:max(0,min(geo.size.width-22,(value-2000)/4500*(geo.size.width-22))))
+            }
+            .frame(maxHeight:.infinity)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance:0).onChanged{valuePoint in value=2000+max(0,min(1,(valuePoint.location.x-11)/(geo.size.width-22)))*4500})
+        }.frame(height:28)
+    }
 }
 
-private struct RGBA: Codable {
-    var red:Double; var green:Double; var blue:Double
-    init(color:Color) { let c=UIColor(color); var r:CGFloat=0,g:CGFloat=0,b:CGFloat=0,a:CGFloat=0; c.getRed(&r,green:&g,blue:&b,alpha:&a); red=Double(r);green=Double(g);blue=Double(b) }
+private struct MinimizeTabBar:ViewModifier {
+    @ViewBuilder func body(content:Content)->some View {
+        if #available(iOS 26.0, *) { content.tabBarMinimizeBehavior(.onScrollDown) }
+        else { content }
+    }
+}
+
+private struct RGBA:Codable {
+    var red:Double;var green:Double;var blue:Double
+    init(color:Color) { let rgb=color.rgb;red=rgb.x;green=rgb.y;blue=rgb.z }
     var color:Color { Color(red:red,green:green,blue:blue) }
 }
 
-private extension View {
-    func glassSurface(corner:CGFloat,tint:Color = .clear,reduce:Bool)->some View {
-        self.padding(1).background {
-            if #available(iOS 26.0, *), !reduce {
-                RoundedRectangle(cornerRadius:corner,style:.continuous).fill(tint.opacity(0.25))
-            } else { RoundedRectangle(cornerRadius:corner,style:.continuous).fill(Color.white.opacity(0.09)) }
-        }
-        .modifier(NativeGlass(corner:corner,reduce:reduce,tint:tint))
+private extension Color {
+    var rgb:SIMD3<Double> {
+        let c=UIColor(self).resolvedColor(with:UITraitCollection(userInterfaceStyle:.dark))
+        var r:CGFloat=0,g:CGFloat=0,b:CGFloat=0,a:CGFloat=0
+        c.getRed(&r,green:&g,blue:&b,alpha:&a)
+        return SIMD3(Double(r),Double(g),Double(b))
+    }
+    var oklab:SIMD3<Double> {
+        let v=rgb
+        let l=pow(0.4122214708*v.x+0.5363325363*v.y+0.0514459929*v.z,1.0/3)
+        let m=pow(0.2119034982*v.x+0.6806995451*v.y+0.1073969566*v.z,1.0/3)
+        let s=pow(0.0883024619*v.x+0.2817188376*v.y+0.6299787005*v.z,1.0/3)
+        return SIMD3(0.2104542553*l+0.7936177850*m-0.0040720468*s,1.9779984951*l-2.4285922050*m+0.4505937099* s,0.0259040371*l+0.7827717662*m-0.8086757660*s)
+    }
+    func saturated(_ factor:Double)->Color {
+        let c=UIColor(self);var h:CGFloat=0,s:CGFloat=0,b:CGFloat=0,a:CGFloat=0
+        c.getHue(&h,saturation:&s,brightness:&b,alpha:&a)
+        return Color(hue:Double(h),saturation:min(1,Double(s)*factor),brightness:Double(b))
     }
 }
-private struct NativeGlass: ViewModifier {
-    let corner:CGFloat; let reduce:Bool; let tint:Color
-    @ViewBuilder func body(content:Content)->some View {
-        if #available(iOS 26.0, *), !reduce {
-            content.glassEffect(.regular.tint(tint).interactive(),in:.rect(cornerRadius:corner))
+
+private extension View {
+    func panelGlass()->some View {
+        modifier(PanelGlassModifier())
+    }
+}
+
+private struct PanelGlassModifier:ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    func body(content:Content)->some View {
+        if #available(iOS 26.0,*),!reduceTransparency {
+            content.background(.clear,in:RoundedRectangle(cornerRadius:24,style:.continuous))
+                .glassEffect(.regular,in:.rect(cornerRadius:24))
+                .overlay(RoundedRectangle(cornerRadius:24,style:.continuous).stroke(.white.opacity(0.12),lineWidth:0.7))
         } else {
-            content.background(.black.opacity(0.58),in:RoundedRectangle(cornerRadius:corner))
-                .overlay(RoundedRectangle(cornerRadius:corner).stroke(.white.opacity(0.2),lineWidth:1))
+            content.background(.black.opacity(0.62),in:RoundedRectangle(cornerRadius:24,style:.continuous))
+                .overlay(RoundedRectangle(cornerRadius:24,style:.continuous).stroke(.white.opacity(0.2),lineWidth:1))
         }
     }
 }
