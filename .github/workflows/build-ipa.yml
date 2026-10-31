@@ -27,7 +27,21 @@ jobs:
           xcodebuild -version
           xcodebuild -showsdks
       - name: Install XcodeGen
-        run: brew install xcodegen
+        run: |
+          VERSION="2.46.0"
+          curl --fail --location --retry 3 --retry-all-errors \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/${VERSION}/xcodegen.zip" \
+            --output "$RUNNER_TEMP/xcodegen.zip"
+          mkdir -p "$RUNNER_TEMP/xcodegen"
+          ditto -x -k "$RUNNER_TEMP/xcodegen.zip" "$RUNNER_TEMP/xcodegen"
+          BINARY="$(find "$RUNNER_TEMP/xcodegen" -type f -name xcodegen -perm -111 -print -quit)"
+          if [ -z "$BINARY" ]; then
+            echo "XcodeGen binary was not found in the release archive."
+            find "$RUNNER_TEMP/xcodegen" -maxdepth 3 -type f -print
+            exit 1
+          fi
+          sudo install -m 0755 "$BINARY" /usr/local/bin/xcodegen
+          xcodegen --version
       - name: Generate Xcode project
         run: xcodegen generate
       - name: Build device app
