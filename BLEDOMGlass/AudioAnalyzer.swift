@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import Combine
 import Accelerate
 
 @MainActor final class AudioAnalyzer: ObservableObject {
