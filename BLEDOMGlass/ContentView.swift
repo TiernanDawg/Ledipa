@@ -1,431 +1,381 @@
 import SwiftUI
 import CoreBluetooth
+import UIKit
 
 struct ContentView: View {
     @EnvironmentObject private var lights: BLEController
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @StateObject private var audio = AudioAnalyzer()
+    @StateObject private var timers = TimerCenter()
+    @Namespace private var glassSpace
+    @State private var tab = 0
+    @State private var hue = 0.57
+    @State private var temperature = 4200.0
+    @State private var sensitivity = 0.65
+    @State private var musicMode = "Rhythm"
+    @State private var selectedCategory = "All"
+    @State private var sceneSpeed = 0.45
+    @State private var sceneBrightness = 80.0
+    @State private var selectedScene: LEDScene?
     @State private var showingDevices = false
-    @State private var showingSaveAlert = false
-    @State private var presetName = ""
-    @State private var showRGBControls = false
+    @State private var diyName = ""
+    @State private var diyColors: [Color] = [.cyan,.purple]
+    @State private var diyMode = "Breathe"
+    @State private var diySpeed = 0.45
+    @State private var diySaved: [LEDScene] = []
+    @State private var recent: [Color] = []
+    @State private var favorites: [Color] = []
+    @State private var showDIY = false
+    @State private var timerDate = Date()
+    @State private var selectedTimer = "Sleep fade"
 
-    private let quickColors: [(String, Color, Double, Double, Double)] = [
-        ("Arctic", Color(red: 0.10, green: 0.68, blue: 1), 0.10, 0.68, 1),
-        ("Aurora", Color(red: 0.38, green: 0.96, blue: 0.72), 0.38, 0.96, 0.72),
-        ("Violet", Color(red: 0.58, green: 0.31, blue: 1), 0.58, 0.31, 1),
-        ("Rose", Color(red: 1, green: 0.18, blue: 0.42), 1, 0.18, 0.42),
-        ("Amber", Color(red: 1, green: 0.53, blue: 0.16), 1, 0.53, 0.16),
-        ("White", .white, 1, 1, 1)
-    ]
-
-    private let scenes: [(String, String, Color, Double, Double, Double)] = [
-        ("Cozy", "Warm and relaxed", Color(red: 1, green: 0.48, blue: 0.20), 1, 0.48, 0.20),
-        ("Focus", "Clear, cool light", Color(red: 0.72, green: 0.84, blue: 1), 0.72, 0.84, 1),
-        ("Ocean", "Deep blue calm", Color(red: 0.05, green: 0.34, blue: 1), 0.05, 0.34, 1),
-        ("Dream", "Soft lavender", Color(red: 0.63, green: 0.40, blue: 1), 0.63, 0.40, 1),
-        ("Sunset", "Golden hour", Color(red: 1, green: 0.24, blue: 0.16), 1, 0.24, 0.16),
-        ("Forest", "Fresh green", Color(red: 0.12, green: 0.82, blue: 0.46), 0.12, 0.82, 0.46)
-    ]
+    private let categories = ["All","Ambient","Nature","Party","Gaming","Cozy","Sleep"]
+    private let modes = ["Fade","Pulse","Breathe","Strobe","Rainbow","Candle flicker","Aurora"]
 
     var body: some View {
         ZStack {
-            ambientBackground
-            TabView {
-                controlPage.tabItem { Label("Controls", systemImage: "slider.horizontal.3") }
-                effectsPage.tabItem { Label("Effects", systemImage: "sparkles") }
-                presetsPage.tabItem { Label("Presets", systemImage: "swatchpalette") }
-                settingsPage.tabItem { Label("Settings", systemImage: "gearshape") }
-            }.tint(.cyan)
+            driftingBackground
+            TabView(selection: $tab) {
+                home.tabItem { Label("Home", systemImage:"house.fill") }.tag(0)
+                scenes.tabItem { Label("Scenes", systemImage:"sparkles") }.tag(1)
+                music.tabItem { Label("Music", systemImage:"waveform") }.tag(2)
+                timersPage.tabItem { Label("Timers", systemImage:"timer") }.tag(3)
+            }
+            .tint(.white)
         }
         .preferredColorScheme(.dark)
-        .sheet(isPresented: $showingDevices) { devicesSheet.presentationDetents([.medium, .large]) }
-        .alert("Save this color", isPresented: $showingSaveAlert) {
-            TextField("Preset name", text: $presetName)
-            Button("Cancel", role: .cancel) { }
-            Button("Save") { lights.saveCurrentPreset(name: presetName) }
-        } message: { Text("Your color will be saved on this iPhone.") }
-    }
-
-    private var controlPage: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 18) {
-                header
-                connectionCard
-                colorCard
-                brightnessCard
-            }.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 28)
+        .animation(reduceMotion ? nil : .spring(response:0.42,dampingFraction:0.82), value:tab)
+        .sheet(isPresented:$showingDevices) { deviceSheet }
+        .sheet(isPresented:$showDIY) { diySheet.presentationDetents([.large]) }
+        .onAppear { restoreState() }
+        .onChange(of: lights.currentColor) { _, color in
+            recent.insert(color, at:0); recent = Array(recent.prefix(8))
         }
     }
 
-    private var effectsPage: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 18) {
-                pageHeading("Effects", subtitle: "Set a scene or make your lights react.")
-                scenesCard
-                CreativeModesView()
-            }.padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 28)
-        }
-    }
-
-    private var presetsPage: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 18) {
-                pageHeading("Your palette", subtitle: "Saved colors, ready in one tap.")
-                presetsCard
-                Button {
-                    presetName = ""
-                    showingSaveAlert = true
-                } label: {
-                    Label("Save current color", systemImage: "bookmark.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(maxWidth: .infinity).padding(.vertical, 14)
-                        .background(.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 16))
-                }.buttonStyle(.plain).foregroundStyle(.white)
-            }.padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 28)
-        }
-    }
-
-    private var settingsPage: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 18) {
-                pageHeading("Settings", subtitle: "Connection preferences and diagnostics.")
-                autoConnectCard
-                RepairDiagnosticsView()
-                footer
-            }.padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 28)
-        }
-    }
-
-    private func pageHeading(_ title: String, subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("MORG’S LED").font(.system(size: 11, weight: .bold, design: .rounded)).tracking(2.4)
-                .foregroundStyle(.white.opacity(0.55))
-            Text(title).font(.system(size: 30, weight: .semibold, design: .rounded)).tracking(-0.8)
-                .foregroundStyle(.white)
-            Text(subtitle).font(.system(size: 13)).foregroundStyle(.white.opacity(0.52))
-        }.padding(.bottom, 2)
-    }
-
-    private var autoConnectCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeading("Auto-connect", subtitle: "Reconnect to your chosen strip when Bluetooth is available.")
-            Toggle("Reconnect to last LED", isOn: Binding(
-                get: { lights.autoConnectEnabled },
-                set: { lights.setAutoConnectEnabled($0) }
-            )).tint(.cyan)
-            HStack(spacing: 10) {
-                Image(systemName: "lightbulb.led.fill").foregroundStyle(.cyan)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(lights.rememberedDeviceName ?? "No LED selected yet")
-                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
-                    Text(lights.rememberedDeviceID == nil ? "Connect to a device once to remember it." : "Saved on this iPhone")
-                        .font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
-                }
-                Spacer()
-                Button("Choose") {
-                    showingDevices = true
-                    if lights.devices.isEmpty { lights.scan() }
-                }.font(.system(size: 12, weight: .semibold))
-            }
-            if lights.rememberedDeviceID != nil {
-                Button("Forget saved LED", role: .destructive) { lights.forgetRememberedDevice() }
-                    .font(.system(size: 12, weight: .medium))
-            }
-            Text("Auto-connect targets the Bluetooth device selected before. The strip must still be powered on and nearby.")
-                .font(.system(size: 10)).foregroundStyle(.white.opacity(0.42)).fixedSize(horizontal: false, vertical: true)
-        }.padding(18).glassPanel().foregroundStyle(.white)
-    }
-
-    private var ambientBackground: some View {
-        ZStack {
-            LinearGradient(colors: [Color(red: 0.025, green: 0.035, blue: 0.075), Color(red: 0.055, green: 0.045, blue: 0.105), Color(red: 0.025, green: 0.035, blue: 0.07)], startPoint: .topLeading, endPoint: .bottomTrailing)
-            Circle().fill(Color.cyan.opacity(0.18)).frame(width: 290).blur(radius: 100).offset(x: 145, y: -340)
-            Circle().fill(Color.purple.opacity(0.18)).frame(width: 280).blur(radius: 105).offset(x: -145, y: 10)
-            Circle().fill(lights.currentColor.opacity(0.17)).frame(width: 250).blur(radius: 100).offset(x: 120, y: 420)
+    private var driftingBackground: some View {
+        TimelineView(.animation(minimumInterval: reduceMotion ? 1 : 0.08, paused: reduceMotion)) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            let c = lights.isOn ? lights.currentColor : Color(red:0.035,green:0.045,blue:0.08)
+            MeshGradient(width:3,height:3,points:[
+                .init(0,0),.init(0.5,0),.init(1,0),
+                .init(0,0.5),.init(Float(0.5+0.12*sin(t*0.12)),Float(0.5+0.1*cos(t*0.1))),.init(1,0.5),
+                .init(0,1),.init(0.5,1),.init(1,1)
+            ],colors:[
+                Color(red:0.018,green:0.024,blue:0.05),c.opacity(0.28),Color(red:0.025,green:0.02,blue:0.07),
+                c.opacity(0.18),Color(red:0.035,green:0.04,blue:0.085),Color(red:0.08,green:0.035,blue:0.11),
+                Color(red:0.025,green:0.035,blue:0.07),c.opacity(0.22),Color(red:0.018,green:0.025,blue:0.055)
+            ])
         }.ignoresSafeArea()
     }
 
-    private var header: some View {
-        HStack(alignment: .center, spacing: 14) {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 7) {
-                    Image(systemName: "sparkles").font(.system(size: 12, weight: .bold))
-                    Text("MORG’S LED").font(.system(size: 12, weight: .bold, design: .rounded)).tracking(2.8)
-                }.foregroundStyle(.white.opacity(0.62))
-                Text("Set the mood.").font(.system(size: 32, weight: .semibold, design: .rounded)).tracking(-1.1)
-                Text("Your lights, your atmosphere.").font(.system(size: 13)).foregroundStyle(.white.opacity(0.55))
-            }
-            Spacer(minLength: 0)
-            Button { lights.togglePower() } label: {
-                ZStack {
-                    Circle().fill(lights.isOn ? lights.currentColor.opacity(0.22) : .white.opacity(0.07))
-                    Circle().stroke(.white.opacity(0.24), lineWidth: 1)
-                    Image(systemName: "power").font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(lights.isOn ? .white : .white.opacity(0.48))
-                }.frame(width: 54, height: 54)
-                    .shadow(color: lights.isOn ? lights.currentColor.opacity(0.25) : .clear, radius: 18)
-            }.buttonStyle(.plain).accessibilityLabel(lights.isOn ? "Turn lights off" : "Turn lights on")
-        }.foregroundStyle(.white)
+    private var statusPill: some View {
+        Button { showingDevices = true; if lights.devices.isEmpty { lights.scan() } } label: {
+            HStack(spacing:8) {
+                Circle().fill(lights.connectedName == nil ? (lights.status.contains("Connecting") ? .orange : .gray) : .green).frame(width:7,height:7)
+                Text(lights.connectedName ?? (lights.status.contains("Connecting") ? "Connecting" : "Offline"))
+                    .font(.system(size:12,weight:.semibold,design:.rounded)).lineLimit(1)
+                Image(systemName:"chevron.down").font(.system(size:9,weight:.bold)).opacity(0.6)
+            }.padding(.horizontal,14).padding(.vertical,10)
+                .glassSurface(corner:22,tint:lights.connectedName == nil ? .white.opacity(0.05) : .green.opacity(0.12), reduce:reduceTransparency)
+        }.buttonStyle(.plain)
     }
 
-    private var connectionCard: some View {
-        Button {
-            showingDevices = true
-            if lights.devices.isEmpty { lights.scan() }
-        } label: {
-            HStack(spacing: 13) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 17).fill(lights.connectedName == nil ? Color.cyan.opacity(0.13) : lights.currentColor.opacity(0.17))
-                    Image(systemName: lights.connectedName == nil ? "dot.radiowaves.left.and.right" : "lightbulb.led.fill")
-                        .font(.system(size: 21, weight: .medium))
-                        .foregroundStyle(lights.connectedName == nil ? Color.cyan : lights.currentColor)
-                }.frame(width: 50, height: 50)
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(lights.connectedName ?? "Connect your LED strip").font(.system(size: 15, weight: .semibold))
-                    HStack(spacing: 6) {
-                        Circle().fill(lights.connectedName == nil ? (lights.isPoweredOn ? Color.orange : Color.gray) : Color.green).frame(width: 6, height: 6)
-                        Text(lights.connectedName == nil ? lights.status : "Connected · Bluetooth").font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.58)).lineLimit(1)
+    private var home: some View {
+        ScrollView(showsIndicators:false) {
+            VStack(spacing:22) {
+                HStack(alignment:.center) {
+                    VStack(alignment:.leading,spacing:4) {
+                        Text("MORG’S LED").font(.system(size:11,weight:.bold,design:.rounded)).tracking(2.4).foregroundStyle(.white.opacity(0.58))
+                        Text("Lighting").font(.system(size:34,weight:.bold,design:.rounded)).tracking(-1)
+                    }
+                    Spacer()
+                    statusPill
+                }.padding(.top,12)
+                HStack(spacing:20) {
+                    colorWheel.frame(width:235,height:235)
+                    VStack(spacing:14) {
+                        Text("BRIGHTNESS").font(.system(size:9,weight:.bold)).tracking(1.4).foregroundStyle(.white.opacity(0.55))
+                        Slider(value:Binding(get:{lights.brightness},set:{lights.setBrightness($0)}),in:1...100)
+                            .tint(lights.currentColor).rotationEffect(.degrees(-90)).frame(width:170,height:32)
+                            .frame(width:44,height:170)
+                        Text("\(Int(lights.brightness))%").font(.system(size:20,weight:.bold,design:.rounded)).monospacedDigit()
+                    }.glassSurface(corner:24,reduce:reduceTransparency).frame(maxHeight:210)
+                }
+                glassCard {
+                    VStack(alignment:.leading,spacing:13) {
+                        HStack { Text("White temperature").font(.system(size:15,weight:.semibold)); Spacer(); Text("\(Int(temperature))K").font(.system(size:13,weight:.semibold,design:.rounded)).monospacedDigit().foregroundStyle(.white.opacity(0.65)) }
+                        Slider(value:$temperature,in:2000...6500,step:50).tint(LinearGradient(colors:[.orange,.white,.cyan],startPoint:.leading,endPoint:.trailing))
+                        HStack { Text("Warm"); Spacer(); Text("Cool") }.font(.system(size:10)).foregroundStyle(.white.opacity(0.48))
                     }
                 }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(.white.opacity(0.45))
-            }.padding(15).glassPanel()
-        }.buttonStyle(.plain).foregroundStyle(.white)
-    }
-
-    private var colorCard: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            sectionHeading("Color studio", subtitle: "Dial in the exact shade")
-            HStack(spacing: 17) {
-                ZStack {
-                    Circle().fill(RadialGradient(colors: [lights.currentColor.opacity(0.85), lights.currentColor.opacity(0.12), .clear], center: .center, startRadius: 5, endRadius: 78)).frame(width: 142, height: 142).blur(radius: 7)
-                    Circle().fill(LinearGradient(colors: [lights.currentColor.opacity(0.78), lights.currentColor], startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 88, height: 88)
-                        .overlay(Circle().stroke(.white.opacity(0.7), lineWidth: 1.3))
-                        .overlay(Circle().stroke(.white.opacity(0.16), lineWidth: 6).padding(5))
-                        .shadow(color: lights.currentColor.opacity(0.55), radius: 24, y: 4)
-                }.frame(width: 132, height: 132)
-                VStack(alignment: .leading, spacing: 9) {
-                    Text("LIVE COLOR").font(.system(size: 10, weight: .bold)).tracking(1.7).foregroundStyle(.white.opacity(0.48))
-                    Text("#\(lights.rgbHex)").font(.system(size: 25, weight: .semibold, design: .rounded)).monospaced().foregroundStyle(.white)
-                    Text("R \(Int(lights.red * 255))   G \(Int(lights.green * 255))   B \(Int(lights.blue * 255))")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced)).foregroundStyle(.white.opacity(0.55))
-                    Button { presetName = ""; showingSaveAlert = true } label: {
-                        Label("Save shade", systemImage: "bookmark").font(.system(size: 12, weight: .semibold))
-                            .padding(.horizontal, 13).padding(.vertical, 9)
-                            .background(.white.opacity(0.10), in: Capsule())
-                            .overlay(Capsule().stroke(.white.opacity(0.13), lineWidth: 1))
-                    }.buttonStyle(.plain).foregroundStyle(.white)
-                }
-                Spacer(minLength: 0)
-            }
-            ColorPicker("Full color picker", selection: Binding(get: { lights.currentColor }, set: { color in
-                let ui = UIColor(color)
-                var r: CGFloat = 0; var g: CGFloat = 0; var b: CGFloat = 0; var a: CGFloat = 0
-                ui.getRed(&r, green: &g, blue: &b, alpha: &a)
-                lights.setColor(red: Double(r), green: Double(g), blue: Double(b))
-            }), supportsOpacity: false)
-            .font(.system(size: 13, weight: .medium)).tint(.white)
-            Rectangle().fill(.white.opacity(0.10)).frame(height: 1)
-            HStack {
-                ForEach(Array(quickColors.enumerated()), id: \.offset) { pair in
-                    let item = pair.element
-                    Button { lights.setColor(red: item.2, green: item.3, blue: item.4) } label: {
-                        VStack(spacing: 7) {
-                            Circle().fill(item.1.gradient).frame(width: 34, height: 34)
-                                .overlay(Circle().stroke(.white.opacity(0.45), lineWidth: 1))
-                                .shadow(color: item.1.opacity(0.32), radius: 8, y: 2)
-                            Text(item.0).font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.62))
-                        }.frame(maxWidth: .infinity)
+                HStack(spacing:12) {
+                    Button { withAnimation(.spring(response:0.35)){ lights.togglePower() }; UIImpactFeedbackGenerator(style:.medium).impactOccurred() } label: {
+                        Label(lights.isOn ? "Power off" : "Power on",systemImage:"power").font(.system(size:16,weight:.semibold,design:.rounded))
+                            .frame(maxWidth:.infinity).padding(.vertical,17).foregroundStyle(.white)
+                            .glassSurface(corner:22,tint:lights.currentColor.opacity(0.34),reduce:reduceTransparency)
+                    }.buttonStyle(.plain)
+                    Button { showingDevices=true; lights.scan() } label: {
+                        Image(systemName:"dot.radiowaves.left.and.right").font(.system(size:17,weight:.semibold)).frame(width:58,height:56)
+                            .glassSurface(corner:20,reduce:reduceTransparency)
                     }.buttonStyle(.plain)
                 }
-            }
-            DisclosureGroup(isExpanded: $showRGBControls) {
-                VStack(spacing: 12) {
-                    rgbSlider("Red", value: Binding(get: { lights.red }, set: { lights.setColor(red: $0, green: lights.green, blue: lights.blue) }), color: .red)
-                    rgbSlider("Green", value: Binding(get: { lights.green }, set: { lights.setColor(red: lights.red, green: $0, blue: lights.blue) }), color: .green)
-                    rgbSlider("Blue", value: Binding(get: { lights.blue }, set: { lights.setColor(red: lights.red, green: lights.green, blue: $0) }), color: .blue)
-                }.padding(.top, 12)
-            } label: {
-                Label("Fine-tune RGB values", systemImage: "slider.horizontal.3").font(.system(size: 12, weight: .medium))
-            }.tint(.white.opacity(0.85))
-        }.padding(19).glassPanel()
+                colorStrip(title:"Recent",colors:recent)
+                colorStrip(title:"Favorites · long-press a color to remove",colors:favorites)
+                Text("Color temperature is approximated with RGB because this controller exposes only a standard RGB color command.")
+                    .font(.system(size:10)).foregroundStyle(.white.opacity(0.4)).frame(maxWidth:.infinity,alignment:.leading)
+            }.padding(.horizontal,20).padding(.bottom,110)
+        }
     }
 
-    private var brightnessCard: some View {
-        VStack(alignment: .leading, spacing: 17) {
-            HStack(alignment: .top) {
-                sectionHeading("Brightness", subtitle: "From subtle glow to full power")
-                Spacer()
-                Text("\(Int(lights.brightness))%").font(.system(size: 20, weight: .semibold, design: .rounded)).monospacedDigit()
+    private var colorWheel: some View {
+        ZStack {
+            Circle().stroke(AngularGradient(colors:[.red,.orange,.yellow,.green,.cyan,.blue,.purple,.pink,.red],center:.center),style:StrokeStyle(lineWidth:20,lineCap:.round))
+                .shadow(color:lights.currentColor.opacity(0.5),radius:18)
+            Circle().stroke(.white.opacity(0.12),lineWidth:1).padding(24)
+            Circle().fill(lights.currentColor.gradient).frame(width:115,height:115).shadow(color:lights.currentColor.opacity(0.65),radius:25)
+            VStack(spacing:2) {
+                Text(lights.rgbHex).font(.system(size:16,weight:.bold,design:.rounded)).monospacedDigit()
+                Text("CURRENT").font(.system(size:8,weight:.bold)).tracking(1.5).opacity(0.62)
             }
-            Slider(value: Binding(get: { lights.brightness }, set: { lights.setBrightness($0) }), in: 1...100)
-                .tint(lights.currentColor)
-            HStack {
-                Label("Low glow", systemImage: "sun.min")
-                Spacer()
-                Label("Full glow", systemImage: "sun.max.fill")
-            }.font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.48))
-            HStack(spacing: 8) {
-                brightnessChip("25%", value: 25)
-                brightnessChip("50%", value: 50)
-                brightnessChip("75%", value: 75)
-                brightnessChip("100%", value: 100)
-            }
-        }.padding(19).glassPanel()
+            Circle().fill(.white).frame(width:19,height:19).overlay(Circle().stroke(lights.currentColor,lineWidth:4))
+                .offset(x:CGFloat(cos(hue*2*Double.pi))*103,y:CGFloat(sin(hue*2*Double.pi))*103)
+                .shadow(color:.white.opacity(0.7),radius:8)
+        }
+        .contentShape(Circle())
+        .gesture(DragGesture(minimumDistance:0).onChanged { v in
+            let dx=v.location.x-117.5,dy=v.location.y-117.5
+            let angle=atan2(dy,dx)/(2*Double.pi)
+            hue=(angle+1).truncatingRemainder(dividingBy:1)
+            let color=Color(hue:hue,saturation:0.92,brightness:1)
+            apply(color)
+            UISelectionFeedbackGenerator().selectionChanged()
+        })
+        .accessibilityLabel("Color wheel")
     }
 
-    private var scenesCard: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            sectionHeading("Atmospheres", subtitle: "One tap to change the room")
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                ForEach(Array(scenes.enumerated()), id: \.offset) { item in
-                    let scene = item.element
-                    Button { lights.setColor(red: scene.3, green: scene.4, blue: scene.5) } label: {
-                        HStack(spacing: 10) {
-                            RoundedRectangle(cornerRadius: 10).fill(scene.2.gradient).frame(width: 39, height: 43)
-                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.25), lineWidth: 1))
-                                .shadow(color: scene.2.opacity(0.3), radius: 9, y: 2)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(scene.0).font(.system(size: 13, weight: .semibold))
-                                Text(scene.1).font(.system(size: 9)).foregroundStyle(.white.opacity(0.52)).lineLimit(1)
-                            }
-                            Spacer(minLength: 0)
-                        }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(.white.opacity(0.09), lineWidth: 1))
-                    }.buttonStyle(.plain).foregroundStyle(.white)
+    private var scenes: some View {
+        ScrollView(showsIndicators:false) {
+            VStack(alignment:.leading,spacing:18) {
+                pageHeader("Scenes","Thirty whole-strip looks, tuned to your room.")
+                ScrollView(.horizontal,showsIndicators:false) {
+                    HStack(spacing:8) { ForEach(categories,id:\.self) { category in
+                        Button(category) { selectedCategory=category }.font(.system(size:12,weight:.semibold))
+                            .padding(.horizontal,13).padding(.vertical,9)
+                            .glassSurface(corner:20,tint:selectedCategory == category ? .white.opacity(0.18) : .white.opacity(0.04),reduce:reduceTransparency)
+                    } }
                 }
-            }
-            Text("Atmospheres apply a solid color. Animated effects depend on the LED controller’s supported protocol.")
-                .font(.system(size: 10)).foregroundStyle(.white.opacity(0.4)).fixedSize(horizontal: false, vertical: true)
-        }.padding(19).glassPanel()
-    }
-
-    private var presetsCard: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            HStack(alignment: .top) {
-                sectionHeading("Saved colors", subtitle: "Your personal palette")
-                Spacer()
-                Text("\(lights.presets.count)").font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .padding(.horizontal, 9).padding(.vertical, 5).background(.white.opacity(0.08), in: Capsule())
-            }
-            if lights.presets.isEmpty {
-                Text("Save a color from Color Studio and it will appear here.")
-                    .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5)).padding(.vertical, 8)
-            } else {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                    ForEach(lights.presets) { preset in
-                        Button { lights.apply(preset) } label: {
-                            HStack(spacing: 9) {
-                                Circle().fill(preset.color.gradient).frame(width: 31, height: 31)
-                                    .overlay(Circle().stroke(.white.opacity(0.4), lineWidth: 1))
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(preset.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                                    Text(String(format: "#%02X%02X%02X", Int(preset.red * 255), Int(preset.green * 255), Int(preset.blue * 255)))
-                                        .font(.system(size: 9, design: .monospaced)).foregroundStyle(.white.opacity(0.47))
-                                }
-                                Spacer(minLength: 0)
-                            }.padding(10).background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 15))
-                                .overlay(RoundedRectangle(cornerRadius: 15).stroke(.white.opacity(0.08), lineWidth: 1))
-                        }.buttonStyle(.plain).foregroundStyle(.white)
-                            .contextMenu { Button("Remove saved color", role: .destructive) { lights.removePreset(preset) } }
+                LazyVGrid(columns:[GridItem(.flexible()),GridItem(.flexible())],spacing:13) {
+                    ForEach(visibleScenes) { scene in
+                        Button {
+                            selectedScene=scene
+                            withAnimation(.easeInOut(duration:0.45)){ apply(scene.color) }
+                            UIImpactFeedbackGenerator(style:.light).impactOccurred()
+                        } label: {
+                            VStack(alignment:.leading,spacing:10) {
+                                ZStack {
+                                    LinearGradient(colors:scene.colors + scene.colors.reversed(),startPoint:.topLeading,endPoint:.bottomTrailing)
+                                    Circle().fill(.white.opacity(0.28)).frame(width:70).blur(radius:22).offset(x:35,y:-18)
+                                    Image(systemName:scene.symbol).font(.system(size:30,weight:.light)).foregroundStyle(.white).shadow(radius:12)
+                                }.frame(height:104).clipShape(RoundedRectangle(cornerRadius:18))
+                                HStack { Text(scene.name).font(.system(size:14,weight:.semibold)); Spacer(); if selectedScene?.id == scene.id { Image(systemName:"checkmark.circle.fill").foregroundStyle(.green) } }
+                                Text(scene.category.uppercased()).font(.system(size:9,weight:.bold)).tracking(1.2).foregroundStyle(.white.opacity(0.45))
+                            }.padding(10).glassSurface(corner:22,reduce:reduceTransparency)
+                        }.buttonStyle(.plain)
                     }
                 }
-            }
-        }.padding(19).glassPanel()
-    }
-
-    private var footer: some View {
-        VStack(spacing: 7) {
-            HStack(spacing: 6) {
-                Image(systemName: "lock.shield")
-                Text("Direct Bluetooth control")
-                Circle().frame(width: 3, height: 3)
-                Text("No account")
-                Circle().frame(width: 3, height: 3)
-                Text("No cloud")
-            }.font(.system(size: 10, weight: .medium))
-            Text("MORG’S LED  ·  PERSONAL LIGHT CONTROL").font(.system(size: 8, weight: .bold)).tracking(1.4)
-        }.foregroundStyle(.white.opacity(0.38)).frame(maxWidth: .infinity).padding(.top, 2)
-    }
-
-    private var devicesSheet: some View {
-        NavigationStack {
-            ZStack {
-                Color(red: 0.045, green: 0.055, blue: 0.1).ignoresSafeArea()
-                List {
-                    Section {
-                        if lights.devices.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                ProgressView().tint(.cyan)
-                                Text(lights.status).font(.subheadline).foregroundStyle(.secondary)
-                                Text("Keep the strip powered on and your iPhone nearby.")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }.padding(.vertical, 12).listRowBackground(Color.white.opacity(0.04))
-                        }
-                        ForEach(lights.devices, id: \.identifier) { device in
-                            Button { lights.connect(device); showingDevices = false } label: {
-                                HStack(spacing: 12) {
-                                    Image(systemName: "lightbulb.led.fill").foregroundStyle(.cyan).frame(width: 30, height: 30)
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(device.name ?? "Bluetooth LED").foregroundStyle(.primary)
-                                        Text(device.identifier.uuidString).font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-                                }
-                            }.listRowBackground(Color.white.opacity(0.04))
-                        }
-                    } header: { Text("Nearby LED devices") }
-                }.scrollContentBackground(.hidden)
-            }
-            .navigationTitle("Connect a light")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Done") { showingDevices = false } }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { lights.scan() } label: { Image(systemName: "arrow.clockwise") }
-                        .disabled(lights.isScanning || !lights.isPoweredOn)
+                glassCard {
+                    VStack(alignment:.leading,spacing:12) {
+                        Text("Scene tuning").font(.system(size:17,weight:.semibold))
+                        HStack { Text("Speed"); Spacer(); Text("\(Int(sceneSpeed*100))%").monospacedDigit() }
+                        Slider(value:$sceneSpeed,in:0.05...1).tint(.cyan)
+                        HStack { Text("Brightness"); Spacer(); Text("\(Int(sceneBrightness))%").monospacedDigit() }
+                        Slider(value:$sceneBrightness,in:1...100).tint(.cyan)
+                        Text("These settings are stored for scene tuning. The current controller accepts whole-strip color and brightness commands; its documented BLE interface does not expose segments.")
+                            .font(.system(size:10)).foregroundStyle(.white.opacity(0.42))
+                    }
                 }
+                Button { showDIY=true } label: { Label("Build a DIY scene",systemImage:"plus").frame(maxWidth:.infinity).padding(16).glassSurface(corner:20,tint:.cyan.opacity(0.16),reduce:reduceTransparency) }.buttonStyle(.plain)
+            }.padding(.horizontal,20).padding(.top,18).padding(.bottom,110)
+        }
+    }
+
+    private var music: some View {
+        ScrollView(showsIndicators:false) {
+            VStack(alignment:.leading,spacing:18) {
+                pageHeader("Music","Let nearby sound move your lights.")
+                glassCard {
+                    VStack(alignment:.leading,spacing:15) {
+                        HStack { Label("Microphone input",systemImage:"mic.fill").font(.system(size:16,weight:.semibold)); Spacer(); Circle().fill(audio.isRunning ? .green : .gray).frame(width:8,height:8) }
+                        Text(audio.message).font(.system(size:12)).foregroundStyle(.white.opacity(0.58))
+                        HStack(spacing:8) {
+                            bandBar("BASS",value:audio.bass,color:.orange)
+                            bandBar("MID",value:audio.mid,color:.cyan)
+                            bandBar("HIGH",value:audio.high,color:.purple)
+                        }.frame(height:115)
+                        Button { audio.isRunning ? audio.stop() : audio.start() } label: {
+                            Label(audio.isRunning ? "Stop listening" : "Enable microphone",systemImage:audio.isRunning ? "stop.fill" : "mic.fill")
+                                .frame(maxWidth:.infinity).padding(14).glassSurface(corner:18,tint:.cyan.opacity(0.18),reduce:reduceTransparency)
+                        }.buttonStyle(.plain)
+                    }
+                }
+                VStack(alignment:.leading,spacing:10) {
+                    Text("Mode").font(.system(size:16,weight:.semibold))
+                    LazyVGrid(columns:[GridItem(.flexible()),GridItem(.flexible())],spacing:9) {
+                        ForEach(["Rhythm","Energic","Spectrum","Rolling"],id:\.self) { m in
+                            Button(m) { musicMode=m; UIImpactFeedbackGenerator(style:.light).impactOccurred() }
+                                .padding(14).frame(maxWidth:.infinity).glassSurface(corner:18,tint:musicMode == m ? .cyan.opacity(0.22) : .white.opacity(0.05),reduce:reduceTransparency).buttonStyle(.plain)
+                        }
+                    }
+                    HStack { Text("Sensitivity"); Spacer(); Text("\(Int(sensitivity*100))%") }
+                    Slider(value:$sensitivity,in:0.1...1).tint(.cyan)
+                }.padding(18).glassSurface(corner:24,reduce:reduceTransparency)
+                Text("Audio is analyzed from the phone microphone, not captured directly from Apple Music or other apps. This controller has one whole-strip RGB command. Music effects are throttled and cannot create true per-pixel spectrum output.")
+                    .font(.system(size:11)).foregroundStyle(.white.opacity(0.43))
+            }.padding(.horizontal,20).padding(.top,18).padding(.bottom,110)
+        }.onChange(of:audio.bass) { _, level in
+            guard audio.isRunning, lights.connectedName != nil else { return }
+            let v=min(1,level*sensitivity*2.8)
+            let color:Color
+            switch musicMode {
+            case "Energic": color=Color(hue:(0.02+v*0.45).truncatingRemainder(dividingBy:1),saturation:1,brightness:0.35+v*0.65)
+            case "Spectrum": color=Color(hue:(0.58+v*0.38).truncatingRemainder(dividingBy:1),saturation:0.95,brightness:0.3+v*0.7)
+            case "Rolling": color=Color(hue:(0.7+v*0.22).truncatingRemainder(dividingBy:1),saturation:0.8,brightness:0.35+v*0.65)
+            default: color=Color(hue:0.56,saturation:0.9,brightness:0.12+v*0.88)
+            }
+            applyThrottled(color)
+        }.onDisappear { audio.stop() }
+    }
+
+    private var timersPage: some View {
+        ScrollView(showsIndicators:false) {
+            VStack(alignment:.leading,spacing:18) {
+                pageHeader("Timers","Schedules need the app awake unless your controller has native timer support.")
+                glassCard {
+                    VStack(alignment:.leading,spacing:14) {
+                        Label("Sleep fade",systemImage:"moon.zzz.fill").font(.system(size:17,weight:.semibold))
+                        HStack { Text("Fade duration"); Spacer(); Text("\(Int(timers.sleepMinutes)) min") }
+                        Slider(value:$timers.sleepMinutes,in:15...180,step:5).tint(.indigo)
+                        Button("Start sleep fade") {
+                            timers.sleepFade(brightness:{lights.setBrightness($0)},powerOff:{lights.togglePower()})
+                        }.buttonStyle(.glass).disabled(lights.connectedName == nil)
+                    }
+                }
+                glassCard {
+                    VStack(alignment:.leading,spacing:14) {
+                        Label("Sunrise wake-up",systemImage:"sunrise.fill").font(.system(size:17,weight:.semibold))
+                        HStack { Text("Gradual brighten"); Spacer(); Text("\(Int(timers.wakeMinutes)) min") }
+                        Slider(value:$timers.wakeMinutes,in:15...30,step:1).tint(.orange)
+                        DatePicker("Wake time",selection:$timerDate,displayedComponents:.hourAndMinute).tint(.orange)
+                        Button("Save wake-up time") { timers.message="Wake time saved locally. Open the app at the scheduled time to run it." }.buttonStyle(.glass)
+                    }
+                }
+                glassCard {
+                    VStack(alignment:.leading,spacing:12) {
+                        Label("Weekly schedules",systemImage:"calendar").font(.system(size:17,weight:.semibold))
+                        Text("Sunset and recurring weekly routines can be configured with Shortcuts automations. iOS does not guarantee background BLE writes from a closed app.")
+                            .font(.system(size:12)).foregroundStyle(.white.opacity(0.55))
+                        Text(timers.message).font(.system(size:11)).foregroundStyle(.orange.opacity(0.85))
+                    }
+                }
+            }.padding(.horizontal,20).padding(.top,18).padding(.bottom,110)
+        }
+    }
+
+    private var diySheet: some View {
+        NavigationStack {
+            Form {
+                Section("Scene") { TextField("Scene name",text:$diyName); Picker("Motion",selection:$diyMode) { ForEach(modes,id:\.self){Text($0)} }; HStack { Text("Speed"); Slider(value:$diySpeed,in:0.05...1) } }
+                Section("Colors · 2 to 6") {
+                    ForEach(diyColors.indices,id:\.self) { i in ColorPicker("Color \(i+1)",selection:$diyColors[i],supportsOpacity:false) }
+                    if diyColors.count < 6 { Button("Add color") { diyColors.append(.pink) } }
+                    if diyColors.count > 2 { Button("Remove last color",role:.destructive) { diyColors.removeLast() } }
+                }
+                Section { Button("Save DIY scene") {
+                    let scene=LEDScene(id:UUID().uuidString,name:diyName.isEmpty ? "My scene" : diyName,category:"DIY",symbol:"wand.and.stars",colors:diyColors)
+                    diySaved.append(scene); selectedScene=scene; apply(scene.color); showDIY=false
+                } }
+            }.scrollContentBackground(.hidden).background(Color.black.opacity(0.86)).navigationTitle("Scene builder").navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement:.topBarTrailing){Button("Done"){showDIY=false}} }
+        }.preferredColorScheme(.dark)
+    }
+
+    private var deviceSheet: some View {
+        NavigationStack {
+            List {
+                if lights.devices.isEmpty { Text(lights.status).foregroundStyle(.secondary); Text("Power on the strip and keep it nearby.").font(.caption).foregroundStyle(.secondary) }
+                ForEach(lights.devices,id:\.identifier) { device in
+                    Button { lights.connect(device); showingDevices=false } label: {
+                        VStack(alignment:.leading) { Text(device.name ?? "Bluetooth LED"); Text(device.identifier.uuidString).font(.caption2).foregroundStyle(.secondary) }
+                    }
+                }
+            }.navigationTitle("Choose LED").toolbar {
+                ToolbarItem(placement:.topBarLeading){Button("Done"){showingDevices=false}}
+                ToolbarItem(placement:.topBarTrailing){Button("Scan"){lights.scan()}}
             }
         }.preferredColorScheme(.dark)
     }
 
-    private func sectionHeading(_ title: String, subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.system(size: 19, weight: .semibold, design: .rounded)).foregroundStyle(.white)
-            Text(subtitle).font(.system(size: 11)).foregroundStyle(.white.opacity(0.48))
-        }
+    private var visibleScenes: [LEDScene] { (selectedCategory == "All" ? LEDScene.library : LEDScene.library.filter{$0.category == selectedCategory}) + diySaved }
+    private func pageHeader(_ title:String,_ subtitle:String)->some View {
+        VStack(alignment:.leading,spacing:5) { HStack { Text("MORG’S LED").font(.system(size:10,weight:.bold)).tracking(2).foregroundStyle(.white.opacity(0.5)); Spacer(); statusPill }; Text(title).font(.system(size:32,weight:.bold,design:.rounded)); Text(subtitle).font(.system(size:12)).foregroundStyle(.white.opacity(0.5)) }.frame(maxWidth:.infinity,alignment:.leading)
     }
-
-    private func brightnessChip(_ title: String, value: Double) -> some View {
-        Button { lights.setBrightness(value) } label: {
-            Text(title).font(.system(size: 11, weight: .semibold)).frame(maxWidth: .infinity).padding(.vertical, 9)
-                .background(abs(lights.brightness - value) < 1 ? lights.currentColor.opacity(0.22) : .white.opacity(0.06), in: Capsule())
-                .overlay(Capsule().stroke(.white.opacity(abs(lights.brightness - value) < 1 ? 0.28 : 0.08), lineWidth: 1))
-        }.buttonStyle(.plain).foregroundStyle(.white)
+    private func glassCard<Content:View>(@ViewBuilder _ content:()->Content)->some View { content().padding(18).glassSurface(corner:26,reduce:reduceTransparency) }
+    private func colorStrip(title:String,colors:[Color])->some View {
+        VStack(alignment:.leading,spacing:10) { Text(title).font(.system(size:13,weight:.semibold)).foregroundStyle(.white.opacity(0.7)); ScrollView(.horizontal,showsIndicators:false) { HStack(spacing:12) { ForEach(Array(colors.enumerated()),id:\.offset) { _,color in Circle().fill(color.gradient).frame(width:36,height:36).overlay(Circle().stroke(.white.opacity(0.28),lineWidth:1)).onTapGesture { apply(color) }.onLongPressGesture { if favorites.contains(color) { favorites.removeAll{$0 == color} } else { favorites.insert(color,at:0) }; persistState() } } } } }
     }
-
-    private func rgbSlider(_ title: String, value: Binding<Double>, color: Color) -> some View {
-        HStack(spacing: 10) {
-            Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(.white.opacity(0.65)).frame(width: 43, alignment: .leading)
-            Slider(value: value, in: 0...1).tint(color)
-            Text(String(format: "%03d", Int(value.wrappedValue * 255))).font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.55)).frame(width: 27, alignment: .trailing)
-        }
+    private func bandBar(_ title:String,value:Double,color:Color)->some View {
+        VStack(spacing:8) { GeometryReader { geo in VStack { Spacer(minLength:0); Capsule().fill(color.gradient).frame(height:max(4,geo.size.height*min(1,value*2.8))) } }.frame(maxWidth:.infinity); Text(title).font(.system(size:9,weight:.bold)).tracking(1).foregroundStyle(.white.opacity(0.55)) }.frame(maxWidth:.infinity).padding(10).glassSurface(corner:16,reduce:reduceTransparency)
+    }
+    private func apply(_ color:Color) {
+        let ui=UIColor(color); var r:CGFloat=0,g:CGFloat=0,b:CGFloat=0,a:CGFloat=0
+        ui.getRed(&r,green:&g,blue:&b,alpha:&a)
+        lights.setColor(red:Double(r),green:Double(g),blue:Double(b))
+        if !recent.contains(color) { recent.insert(color,at:0); recent=Array(recent.prefix(8)) }
+        persistState()
+    }
+    private func applyThrottled(_ color:Color) {
+        guard Date().timeIntervalSinceReferenceDate - lastAudioWrite >= 0.04 else { return }
+        lastAudioWrite=Date().timeIntervalSinceReferenceDate; apply(color)
+    }
+    @State private var lastAudioWrite = 0.0
+    private func restoreState() {
+        if let data=UserDefaults.standard.data(forKey:"morgs.recent"),let values=try? JSONDecoder().decode([RGBA].self,from:data) { recent=values.map{$0.color} }
+        if let data=UserDefaults.standard.data(forKey:"morgs.favorites"),let values=try? JSONDecoder().decode([RGBA].self,from:data) { favorites=values.map{$0.color} }
+    }
+    private func persistState() {
+        let r=recent.map{RGBA(color:$0)},f=favorites.map{RGBA(color:$0)}
+        UserDefaults.standard.set(try? JSONEncoder().encode(r),forKey:"morgs.recent")
+        UserDefaults.standard.set(try? JSONEncoder().encode(f),forKey:"morgs.favorites")
     }
 }
 
-private struct GlassPanel: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 27, style: .continuous))
-            .background(LinearGradient(colors: [.white.opacity(0.065), .white.opacity(0.018)], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 27, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 27, style: .continuous).stroke(LinearGradient(colors: [.white.opacity(0.26), .white.opacity(0.035), .white.opacity(0.10)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
-            .shadow(color: .black.opacity(0.19), radius: 24, y: 12)
-    }
+private struct RGBA: Codable {
+    var red:Double; var green:Double; var blue:Double
+    init(color:Color) { let c=UIColor(color); var r:CGFloat=0,g:CGFloat=0,b:CGFloat=0,a:CGFloat=0; c.getRed(&r,green:&g,blue:&b,alpha:&a); red=Double(r);green=Double(g);blue=Double(b) }
+    var color:Color { Color(red:red,green:green,blue:blue) }
 }
 
 private extension View {
-    func glassPanel() -> some View { modifier(GlassPanel()) }
+    func glassSurface(corner:CGFloat,tint:Color = .clear,reduce:Bool)->some View {
+        self.padding(1).background {
+            if #available(iOS 26.0, *), !reduce {
+                RoundedRectangle(cornerRadius:corner,style:.continuous).fill(tint.opacity(0.25))
+            } else { RoundedRectangle(cornerRadius:corner,style:.continuous).fill(Color.white.opacity(0.09)) }
+        }
+        .modifier(NativeGlass(corner:corner,reduce:reduce,tint:tint))
+    }
+}
+private struct NativeGlass: ViewModifier {
+    let corner:CGFloat; let reduce:Bool; let tint:Color
+    @ViewBuilder func body(content:Content)->some View {
+        if #available(iOS 26.0, *), !reduce {
+            content.glassEffect(.regular.tint(tint).interactive(),in:.rect(cornerRadius:corner))
+        } else {
+            content.background(.black.opacity(0.58),in:RoundedRectangle(cornerRadius:corner))
+                .overlay(RoundedRectangle(cornerRadius:corner).stroke(.white.opacity(0.2),lineWidth:1))
+        }
+    }
 }
