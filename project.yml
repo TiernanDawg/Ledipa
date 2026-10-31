@@ -10,6 +10,7 @@ targets:
     sources:
       - BLEDOMGlass
     info:
+      path: Info.plist
       properties:
         CFBundleURLTypes:
           - CFBundleURLName: com.tiernandawg.morgsled
