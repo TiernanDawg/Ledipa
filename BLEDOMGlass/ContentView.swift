@@ -624,7 +624,7 @@ struct ContentView: View {
     @State private var lastAudioWrite=0.0
     private func applyThrottled(_ color:Color) {
         let now=Date().timeIntervalSinceReferenceDate
-        guard now-lastAudioWrite>=0.04 else { return }
+        guard now-lastAudioWrite>=0.22 else { return }
         lastAudioWrite=now; apply(color)
     }
 
