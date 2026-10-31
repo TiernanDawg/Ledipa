@@ -41,7 +41,7 @@ import Accelerate
                 return
             }
             sampleRate = format.sampleRate
-            fftSetup = vDSP_DFT_zrop_CreateSetup(nil, vDSP_Length(frameCount), .forward)
+            fftSetup = vDSP_DFT_zrop_CreateSetup(nil, vDSP_Length(frameCount), .FORWARD)
             guard fftSetup != nil else { message = "Audio analyzer could not initialize"; return }
 
             input.installTap(onBus: 0, bufferSize: AVAudioFrameCount(frameCount), format: format) { [weak self] buffer, _ in
