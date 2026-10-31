@@ -29,9 +29,13 @@ jobs:
       - name: Install XcodeGen
         run: |
           VERSION="2.46.0"
-          curl --fail --location --retry 3 --retry-all-errors \
+          curl --fail --location --retry 6 --retry-delay 4 --retry-all-errors --connect-timeout 20 --max-time 240 \
             "https://github.com/yonaskolb/XcodeGen/releases/download/${VERSION}/xcodegen.zip" \
-            --output "$RUNNER_TEMP/xcodegen.zip"
+            --output "$RUNNER_TEMP/xcodegen.zip" || { \
+              echo "Direct release download failed; trying Homebrew as a fallback."; \
+              brew install xcodegen; \
+              exit 0; \
+            }
           mkdir -p "$RUNNER_TEMP/xcodegen"
           ditto -x -k "$RUNNER_TEMP/xcodegen.zip" "$RUNNER_TEMP/xcodegen"
           BINARY="$(find "$RUNNER_TEMP/xcodegen" -type f -name xcodegen -perm -111 -print -quit)"
