@@ -694,23 +694,37 @@ private struct RGBA:Codable {
 }
 
 private extension Color {
-    var rgb:SIMD3<Double> {
-        let c=UIColor(self).resolvedColor(with:UITraitCollection(userInterfaceStyle:.dark))
-        var r:CGFloat=0,g:CGFloat=0,b:CGFloat=0,a:CGFloat=0
-        c.getRed(&r,green:&g,blue:&b,alpha:&a)
-        return SIMD3(Double(r),Double(g),Double(b))
+    var rgb: SIMD3<Double> {
+        let resolved = UIColor(self).resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark))
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        return SIMD3<Double>(Double(red), Double(green), Double(blue))
     }
-    var oklab:SIMD3<Double> {
-        let v=rgb
-        let l=pow(0.4122214708*v.x+0.5363325363*v.y+0.0514459929*v.z,1.0/3)
-        let m=pow(0.2119034982*v.x+0.6806995451*v.y+0.1073969566*v.z,1.0/3)
-        let s=pow(0.0883024619*v.x+0.2817188376*v.y+0.6299787005*v.z,1.0/3)
-        return SIMD3(0.2104542553*l+0.7936177850*m-0.0040720468*s,1.9779984951*l-2.4285922050*m+0.4505937099* s,0.0259040371*l+0.7827717662*m-0.8086757660*s)
+
+    var oklab: SIMD3<Double> {
+        let value = rgb
+        let r = value.x
+        let g = value.y
+        let b = value.z
+        let l = cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+        let m = cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+        let smallS = cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+        let lightness = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * smallS
+        let axisA = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * smallS
+        let axisB = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * smallS
+        return SIMD3<Double>(lightness, axisA, axisB)
     }
-    func saturated(_ factor:Double)->Color {
-        let c=UIColor(self);var h:CGFloat=0,s:CGFloat=0,b:CGFloat=0,a:CGFloat=0
-        c.getHue(&h,saturation:&s,brightness:&b,alpha:&a)
-        return Color(hue:Double(h),saturation:min(1,Double(s)*factor),brightness:Double(b))
+
+    func saturated(_ factor: Double) -> Color {
+        var hue: CGFloat = 0
+        var saturation: CGFloat = 0
+        var brightness: CGFloat = 0
+        var alpha: CGFloat = 0
+        UIColor(self).getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+        return Color(hue: Double(hue), saturation: min(1, Double(saturation) * factor), brightness: Double(brightness))
     }
 }
 
