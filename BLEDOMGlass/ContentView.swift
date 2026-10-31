@@ -100,7 +100,7 @@ struct ContentView: View {
                         HStack(spacing:8) {
                             Button { showingInfo=true } label: {
                                 Image(systemName:"info").font(.system(size:12,weight:.bold)).frame(width:34,height:34)
-                                    .glassEffect(.regular.interactive(),in:.circle).glassEffectID("info-button",in:glassSpace)
+                                    .glassEffect(.regular.interactive(),in:Circle()).glassEffectID("info-button",in:glassSpace)
                             }.buttonStyle(.plain).accessibilityLabel("Information")
                             statusPill
                         }
@@ -729,7 +729,7 @@ private struct GlassControlModifier:ViewModifier {
         if #available(iOS 26.0,*),!reduceTransparency {
             content.padding(.horizontal,12).padding(.vertical,8)
                 .background(tint.opacity(0.12),in:Capsule())
-                .glassEffect(.regular.tint(tint).interactive(),in:.capsule)
+                .glassEffect(.regular.tint(tint).interactive(),in:Capsule())
                 .glassEffectID(id,in:namespace)
         } else {
             content.padding(.horizontal,12).padding(.vertical,8)
