@@ -15,11 +15,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Select Xcode 27
+      - name: Select latest installed Xcode 26 SDK
         run: |
-          XCODE="$(find /Applications -maxdepth 1 -name 'Xcode_27*.app' -print -quit)"
+          XCODE="$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' -print -quit)"
           if [ -z "$XCODE" ]; then
-            echo "Xcode 27 is not installed on this runner image."
+            echo "Xcode 26 is not installed on this runner image."
             ls -1 /Applications | grep -i Xcode || true
             exit 1
           fi
