@@ -25,6 +25,7 @@ struct ContentView: View {
     @State private var diyMode = "Breathe"
     @State private var diySpeed = 0.45
     @State private var diySaved: [LEDScene] = []
+    @State private var sceneTask: Task<Void, Never>?
     @State private var recent: [Color] = []
     @State private var favorites: [Color] = []
     @State private var showDIY = false
@@ -177,7 +178,7 @@ struct ContentView: View {
                     ForEach(visibleScenes) { scene in
                         Button {
                             selectedScene=scene
-                            withAnimation(.easeInOut(duration:0.45)){ apply(scene.color) }
+                            startScene(scene)
                             UIImpactFeedbackGenerator(style:.light).impactOccurred()
                         } label: {
                             VStack(alignment:.leading,spacing:10) {
@@ -265,8 +266,9 @@ struct ContentView: View {
                         HStack { Text("Fade duration"); Spacer(); Text("\(Int(timers.sleepMinutes)) min") }
                         Slider(value:$timers.sleepMinutes,in:15...180,step:5).tint(.indigo)
                         Button("Start sleep fade") {
-                            timers.sleepFade(brightness:{lights.setBrightness($0)},powerOff:{lights.togglePower()})
+                            timers.sleepFade(brightness:{lights.setBrightness($0)},powerOff:{ if lights.isOn { lights.togglePower() } })
                         }.buttonStyle(.glass).disabled(lights.connectedName == nil)
+                        if timers.enabled { Button("Cancel timer",role:.destructive) { timers.cancel() } }
                     }
                 }
                 glassCard {
@@ -275,13 +277,16 @@ struct ContentView: View {
                         HStack { Text("Gradual brighten"); Spacer(); Text("\(Int(timers.wakeMinutes)) min") }
                         Slider(value:$timers.wakeMinutes,in:15...30,step:1).tint(.orange)
                         DatePicker("Wake time",selection:$timerDate,displayedComponents:.hourAndMinute).tint(.orange)
-                        Button("Save wake-up time") { timers.message="Wake time saved locally. Open the app at the scheduled time to run it." }.buttonStyle(.glass)
+                        Button("Schedule sunrise") {
+                            timers.scheduleWake(at: timerDate, brightness:{lights.setBrightness($0)}, powerOn:{ if !lights.isOn { lights.togglePower() } })
+                        }.buttonStyle(.glass).disabled(lights.connectedName == nil)
+                        if timers.enabled { Button("Cancel timer",role:.destructive) { timers.cancel() } }
                     }
                 }
                 glassCard {
                     VStack(alignment:.leading,spacing:12) {
                         Label("Weekly schedules",systemImage:"calendar").font(.system(size:17,weight:.semibold))
-                        Text("Sunset and recurring weekly routines can be configured with Shortcuts automations. iOS does not guarantee background BLE writes from a closed app.")
+                        Text("A saved time cannot wake a suspended app to send Bluetooth commands. For recurring days, create a personal Shortcut automation that opens Morg’s LED at the chosen time; start the routine here after it opens. Notifications can remind you, but cannot directly control this strip.")
                             .font(.system(size:12)).foregroundStyle(.white.opacity(0.55))
                         Text(timers.message).font(.system(size:11)).foregroundStyle(.orange.opacity(0.85))
                     }
@@ -300,8 +305,8 @@ struct ContentView: View {
                     if diyColors.count > 2 { Button("Remove last color",role:.destructive) { diyColors.removeLast() } }
                 }
                 Section { Button("Save DIY scene") {
-                    let scene=LEDScene(id:UUID().uuidString,name:diyName.isEmpty ? "My scene" : diyName,category:"DIY",symbol:"wand.and.stars",colors:diyColors)
-                    diySaved.append(scene); selectedScene=scene; apply(scene.color); showDIY=false
+                    let scene=LEDScene(id:UUID().uuidString,name:diyName.isEmpty ? "My scene" : diyName,category:"DIY",symbol:"wand.and.stars",colors:diyColors,motion:diyMode,speed:diySpeed)
+                    diySaved.append(scene); selectedScene=scene; persistScenes(); startScene(scene); showDIY=false
                 } }
             }.scrollContentBackground(.hidden).background(Color.black.opacity(0.86)).navigationTitle("Scene builder").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement:.topBarTrailing){Button("Done"){showDIY=false}} }
@@ -350,12 +355,55 @@ struct ContentView: View {
     private func restoreState() {
         if let data=UserDefaults.standard.data(forKey:"morgs.recent"),let values=try? JSONDecoder().decode([RGBA].self,from:data) { recent=values.map{$0.color} }
         if let data=UserDefaults.standard.data(forKey:"morgs.favorites"),let values=try? JSONDecoder().decode([RGBA].self,from:data) { favorites=values.map{$0.color} }
+        if let data=UserDefaults.standard.data(forKey:"morgs.diy-scenes"),let values=try? JSONDecoder().decode([SavedScene].self,from:data) {
+            diySaved=values.map { LEDScene(id:$0.id,name:$0.name,category:"DIY",symbol:"wand.and.stars",colors:$0.colors.map{$0.color},motion:$0.motion,speed:$0.speed) }
+        }
+    }
+    private func persistScenes() {
+        let values=diySaved.map { SavedScene(id:$0.id,name:$0.name,colors:$0.colors.map{RGBA(color:$0)},motion:$0.motion,speed:$0.speed) }
+        UserDefaults.standard.set(try? JSONEncoder().encode(values),forKey:"morgs.diy-scenes")
+    }
+    private func startScene(_ scene:LEDScene) {
+        sceneTask?.cancel()
+        guard !scene.colors.isEmpty else { apply(.white); return }
+        lights.setBrightness(sceneBrightness)
+        let interval=max(0.12,2.2-(scene.speed*1.9))
+        sceneTask=Task { @MainActor in
+            var index=0
+            while !Task.isCancelled {
+                let color:Color
+                switch scene.motion {
+                case "Rainbow":
+                    color=Color(hue:Double(index % 24)/24.0,saturation:0.95,brightness:1)
+                case "Strobe":
+                    color=index % 2 == 0 ? scene.colors[index % scene.colors.count] : .black
+                case "Candle flicker":
+                    color=index % 4 == 0 ? scene.colors[index % scene.colors.count].opacity(0.58) : scene.colors[index % scene.colors.count]
+                case "Pulse","Breathe":
+                    color=scene.colors[index % scene.colors.count].opacity(index % 2 == 0 ? 1 : 0.48)
+                default:
+                    color=scene.colors[index % scene.colors.count]
+                }
+                apply(color)
+                index += 1
+                do { try await Task.sleep(for:.seconds(scene.motion == "Strobe" ? max(0.12,interval/3) : interval)) }
+                catch { return }
+            }
+        }
     }
     private func persistState() {
         let r=recent.map{RGBA(color:$0)},f=favorites.map{RGBA(color:$0)}
         UserDefaults.standard.set(try? JSONEncoder().encode(r),forKey:"morgs.recent")
         UserDefaults.standard.set(try? JSONEncoder().encode(f),forKey:"morgs.favorites")
     }
+}
+
+private struct SavedScene: Codable {
+    var id:String
+    var name:String
+    var colors:[RGBA]
+    var motion:String
+    var speed:Double
 }
 
 private struct RGBA: Codable {
