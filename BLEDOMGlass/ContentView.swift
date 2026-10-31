@@ -287,7 +287,14 @@ struct ContentView: View {
                 glassCard {
                     VStack(alignment:.leading,spacing:12) {
                         Label("Weekly schedules",systemImage:"calendar").font(.system(size:17,weight:.semibold))
-                        Text("A saved time cannot wake a suspended app to send Bluetooth commands. For recurring days, create a personal Shortcut automation that opens Morg’s LED at the chosen time; start the routine here after it opens. Notifications can remind you, but cannot directly control this strip.")
+                        Text("Shortcuts alternative · use an Open URLs action in a personal automation:")
+                        VStack(alignment:.leading,spacing:5) {
+                            Text("morgsled://power/on")
+                            Text("morgsled://power/off")
+                            Text("morgsled://brightness?value=40")
+                            Text("morgsled://color?hex=FF00AA")
+                        }.font(.system(size:11,weight:.medium,design:.monospaced)).foregroundStyle(.cyan)
+                        Text("A saved time cannot wake a suspended app to send Bluetooth commands. A personal Shortcut can open the app with one of these commands at a scheduled time; iOS may still require the phone to be unlocked and Bluetooth connected.")
                             .font(.system(size:12)).foregroundStyle(.white.opacity(0.55))
                         Text(timers.message).font(.system(size:11)).foregroundStyle(.orange.opacity(0.85))
                     }
