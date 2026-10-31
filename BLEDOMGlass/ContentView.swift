@@ -532,6 +532,7 @@ struct ContentView: View {
     }
 
     private func apply(_ color:Color) {
+        // Keep the selected sRGB channels unchanged for the hardware command.
         let rgb=color.rgb
         lights.setColor(red:rgb.x,green:rgb.y,blue:rgb.z)
         addRecent(color)
@@ -565,27 +566,38 @@ struct ContentView: View {
 
     private func startScene(_ scene:LEDScene) {
         sceneTask?.cancel()
-        guard !scene.colors.isEmpty else { return }
+        guard !scene.colors.isEmpty, lights.connectedName != nil else { return }
         lights.setBrightness(sceneBrightness)
         let speed=scene.category == "DIY" ? scene.speed : sceneSpeed
-        let interval=max(0.14,2.0-speed*1.75)
+        // BLE controllers generally need a modest write interval to avoid dropped updates.
+        let interval=max(0.22,1.8-speed*1.35)
         sceneTask=Task { @MainActor in
-            var index=0
+            var step=0
             while !Task.isCancelled {
-                let base=scene.colors[index%scene.colors.count]
-                let next=scene.colors[(index+1)%scene.colors.count]
+                let count=scene.colors.count
+                let base=scene.colors[(step/4)%count]
+                let next=scene.colors[((step/4)+1)%count]
+                let phase=Double(step%4)/3.0
                 let color:Color
                 switch scene.motion {
-                case "Rainbow": color=Color(hue:Double(index%24)/24,saturation:0.95,brightness:1)
-                case "Strobe": color=index%2 == 0 ? base : .black
-                case "Candle flicker": color=index%4 == 0 ? base.opacity(0.55) : base
-                case "Pulse","Breathe": color=base.opacity(index%2 == 0 ? 1 : 0.42)
-                case "Aurora": color=ColorScience.mixColor(base,next,t:0.5)
-                default: color=ColorScience.mixColor(base,next,t:0.5)
+                case "Rainbow":
+                    color=Color(hue:Double(step%24)/24.0,saturation:0.95,brightness:1)
+                case "Strobe":
+                    color=step%2 == 0 ? base : Color(red:0,green:0,blue:0)
+                case "Candle flicker":
+                    let level=[0.72,1.0,0.84,0.94][step%4]
+                    color=ColorScience.mixColor(Color(red:0,green:0,blue:0),base,t:level)
+                case "Pulse","Breathe":
+                    let level=0.30+0.70*(0.5-0.5*cos(Double(step%12)*Double.pi/6))
+                    color=ColorScience.mixColor(Color(red:0,green:0,blue:0),base,t:level)
+                case "Aurora","Fade":
+                    color=ColorScience.mixColor(base,next,t:phase)
+                default:
+                    color=ColorScience.mixColor(base,next,t:phase)
                 }
                 apply(color)
-                index += 1
-                do { try await Task.sleep(for:.seconds(scene.motion == "Strobe" ? max(0.12,interval/3) : interval)) } catch { return }
+                step += 1
+                do { try await Task.sleep(for:.seconds(interval)) } catch { return }
             }
         }
     }
@@ -697,7 +709,12 @@ private extension Color {
         var green: CGFloat = 0
         var blue: CGFloat = 0
         var alpha: CGFloat = 0
-        resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+        let cgColor = resolved.cgColor.converted(to: colorSpace, intent: .defaultIntent, options: nil) ?? resolved.cgColor
+        let components = cgColor.components ?? [0,0,0,1]
+        if components.count >= 3 {
+            return SIMD3<Double>(Double(components[0]), Double(components[1]), Double(components[2]))
+        }
         return SIMD3<Double>(Double(red), Double(green), Double(blue))
     }
 
