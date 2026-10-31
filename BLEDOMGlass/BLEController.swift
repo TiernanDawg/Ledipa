@@ -38,10 +38,20 @@ final class BLEController: NSObject, ObservableObject {
     private let rememberedDeviceIDKey = "morgs-led.remembered-device-id"
     private let rememberedDeviceNameKey = "morgs-led.remembered-device-name"
     private let autoConnectKey = "morgs-led.auto-connect"
+    private let stateKey = "morgs-led.last-state"
+    private var manualDisconnect = false
+    private var reconnectAttempts = 0
 
     override init() {
         super.init()
         central = CBCentralManager(delegate: self, queue: .main)
+        if let state = UserDefaults.standard.dictionary(forKey: stateKey) {
+            red = state["red"] as? Double ?? red
+            green = state["green"] as? Double ?? green
+            blue = state["blue"] as? Double ?? blue
+            brightness = state["brightness"] as? Double ?? brightness
+            isOn = state["isOn"] as? Bool ?? isOn
+        }
         if let data = UserDefaults.standard.data(forKey: presetsKey),
            let saved = try? JSONDecoder().decode([LEDPreset].self, from: data) {
             presets = saved
@@ -81,6 +91,8 @@ final class BLEController: NSObject, ObservableObject {
     }
 
     func connect(_ peripheral: CBPeripheral) {
+        manualDisconnect = false
+        reconnectAttempts = 0
         UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: rememberedDeviceIDKey)
         UserDefaults.standard.set(peripheral.name ?? "BLEDOM LED", forKey: rememberedDeviceNameKey)
         objectWillChange.send()
@@ -93,6 +105,7 @@ final class BLEController: NSObject, ObservableObject {
     }
 
     func disconnect() {
+        manualDisconnect = true
         guard let activePeripheral else { return }
         central.cancelPeripheralConnection(activePeripheral)
     }
@@ -122,6 +135,7 @@ final class BLEController: NSObject, ObservableObject {
 
     func setColor(red r: Double, green g: Double, blue b: Double) {
         red = r; green = g; blue = b
+        persistState()
         sendColor()
     }
 
@@ -136,6 +150,7 @@ final class BLEController: NSObject, ObservableObject {
 
     func setBrightness(_ value: Double) {
         brightness = value
+        persistState()
         guard let peripheral = activePeripheral, let characteristic = writeCharacteristic else { return }
         let amount = UInt8(min(100, max(0, Int(value.rounded()))))
         write([0x7E, 0x00, 0x01, amount, 0x00, 0x00, 0x00, 0x00, 0xEF], to: peripheral, characteristic: characteristic)
@@ -143,6 +158,7 @@ final class BLEController: NSObject, ObservableObject {
 
     func togglePower() {
         isOn.toggle()
+        persistState()
         guard let peripheral = activePeripheral, let characteristic = writeCharacteristic else {
             isOn.toggle(); status = "Connect to your light first"; return
         }
@@ -150,6 +166,10 @@ final class BLEController: NSObject, ObservableObject {
             ? [0x7E, 0x00, 0x04, 0xF0, 0x00, 0x01, 0xFF, 0x00, 0xEF]
             : [0x7E, 0x00, 0x04, 0x00, 0x00, 0x00, 0xFF, 0x00, 0xEF]
         write(frame, to: peripheral, characteristic: characteristic)
+    }
+
+    private func persistState() {
+        UserDefaults.standard.set(["red": red, "green": green, "blue": blue, "brightness": brightness, "isOn": isOn], forKey: stateKey)
     }
 
     func saveCurrentPreset(name: String) {
@@ -222,7 +242,15 @@ extension BLEController: CBCentralManagerDelegate {
         connectedName = nil
         activePeripheral = nil
         writeCharacteristic = nil
-        status = error == nil ? "Disconnected" : "Connection lost — reconnect to continue"
+        status = error == nil ? "Disconnected" : "Connection lost — reconnecting"
+        if autoConnectEnabled, !manualDisconnect, reconnectAttempts < 5, isPoweredOn {
+            reconnectAttempts += 1
+            let delay = min(20.0, pow(2.0, Double(reconnectAttempts)))
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, self.activePeripheral == nil, self.autoConnectEnabled, !self.manualDisconnect else { return }
+                self.attemptAutoConnect()
+            }
+        } else if manualDisconnect { manualDisconnect = false }
     }
 }
 
