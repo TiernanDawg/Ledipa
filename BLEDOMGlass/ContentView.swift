@@ -726,8 +726,34 @@ private extension Color {
 }
 
 private extension View {
+    func glassControl(id: String, namespace: Namespace.ID, tint: Color) -> some View {
+        modifier(GlassControlModifier(id: id, namespace: namespace, tint: tint))
+    }
+
+    func controlGlass(id: String, tint: Color = .white.opacity(0.08)) -> some View {
+        modifier(SimpleControlGlassModifier(tint: tint))
+    }
+
     func panelGlass()->some View {
         modifier(PanelGlassModifier())
+    }
+}
+
+private struct SimpleControlGlassModifier: ViewModifier {
+    let tint: Color
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *), !reduceTransparency {
+            content
+                .background(tint.opacity(0.14), in: Capsule())
+                .glassEffect(.regular.tint(tint).interactive(), in: Capsule())
+        } else {
+            content
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
+        }
     }
 }
 
