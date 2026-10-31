@@ -609,7 +609,7 @@ struct ContentView: View {
         applyThrottled(Color(hue:h,saturation:0.94,brightness:brightness))
     }
 
-    private var lastAudioWrite=0.0
+    @State private var lastAudioWrite=0.0
     private func applyThrottled(_ color:Color) {
         let now=Date().timeIntervalSinceReferenceDate
         guard now-lastAudioWrite>=0.04 else { return }
@@ -650,6 +650,14 @@ struct ContentView: View {
         UserDefaults.standard.set(try? JSONEncoder().encode(recent.map{RGBA(color:$0)}),forKey:"morgs.recent")
         UserDefaults.standard.set(try? JSONEncoder().encode(favorites.map{RGBA(color:$0)}),forKey:"morgs.favorites")
     }
+}
+
+private struct SavedScene: Codable {
+    var id: String
+    var name: String
+    var colors: [RGBA]
+    var motion: String
+    var speed: Double
 }
 
 private struct TemperatureTrack:View {
