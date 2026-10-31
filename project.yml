@@ -20,6 +20,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tiernandawg.morgsled
         PRODUCT_NAME: "Morgs LED"
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
         INFOPLIST_KEY_CFBundleDisplayName: "Morg’s LED"
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "Morg’s LED uses the microphone to react to nearby music and sound when you enable a sound-reactive mode."
         INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: "Morg’s LED uses Bluetooth to find and control your nearby LED strip. No account or internet connection is required."
