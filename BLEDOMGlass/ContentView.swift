@@ -50,6 +50,12 @@ struct ContentView: View {
         .sheet(isPresented:$showingDevices) { deviceSheet }
         .sheet(isPresented:$showDIY) { diySheet.presentationDetents([.large]) }
         .onAppear { restoreState() }
+        .onChange(of: temperature) { _, kelvin in
+            let t = (kelvin - 2000) / 4500
+            let warm = 1.0 - t * 0.32
+            let cool = 0.58 + t * 0.42
+            lights.setColor(red: min(1,warm), green: min(1,0.52 + t * 0.46), blue: min(1,cool))
+        }
         .onChange(of: lights.currentColor) { _, color in
             recent.insert(color, at:0); recent = Array(recent.prefix(8))
         }
@@ -176,7 +182,7 @@ struct ContentView: View {
                         } label: {
                             VStack(alignment:.leading,spacing:10) {
                                 ZStack {
-                                    LinearGradient(colors:scene.colors + scene.colors.reversed(),startPoint:.topLeading,endPoint:.bottomTrailing)
+                                    LinearGradient(colors:scene.colors + Array(scene.colors.reversed()),startPoint:.topLeading,endPoint:.bottomTrailing)
                                     Circle().fill(.white.opacity(0.28)).frame(width:70).blur(radius:22).offset(x:35,y:-18)
                                     Image(systemName:scene.symbol).font(.system(size:30,weight:.light)).foregroundStyle(.white).shadow(radius:12)
                                 }.frame(height:104).clipShape(RoundedRectangle(cornerRadius:18))
