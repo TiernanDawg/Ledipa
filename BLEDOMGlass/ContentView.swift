@@ -146,53 +146,54 @@ struct ContentView: View {
     }
 
     private var colorHero: some View {
-        GeometryReader { geo in
-            let side=min(geo.size.width,340.0)
-            ZStack {
-                Circle().stroke(.white.opacity(0.08),style:StrokeStyle(lineWidth:28,lineCap:.round)).padding(10)
-                Circle().trim(from:0,to:1).stroke(AngularGradient(colors:[.red,.orange,.yellow,.green,.cyan,.blue,.purple,.pink,.red],center:.center),style:StrokeStyle(lineWidth:28,lineCap:.round))
-                    .rotationEffect(.degrees(-90)).padding(10)
-                    Circle().stroke(.white.opacity(0.14),lineWidth:1).padding(34)
-                Circle().fill(lights.currentColor.gradient).frame(width:side*0.38,height:side*0.38)
-                    .overlay(Circle().fill(.white.opacity(0.18)).blur(radius:12).padding(14))
-                    .shadow(color:lights.isOn ? accent.opacity(bloom ? 0.9 : 0.48) : .clear,radius:bloom ? 38 : 22)
-                    .scaleEffect(bloom ? 1.08 : 1)
-                    .onTapGesture {
-                        withAnimation(.spring(response:0.34,dampingFraction:0.58)) { bloom.toggle(); lights.togglePower() }
-                        UIImpactFeedbackGenerator(style:.medium).impactOccurred()
-                    }
-                    .accessibilityLabel(lights.isOn ? "Turn lights off" : "Turn lights on")
-                    .accessibilityAddTraits(.isButton)
-                Circle().fill(.white).frame(width:18,height:18).overlay(Circle().stroke(accent,lineWidth:4))
-                    .shadow(color:.white.opacity(0.75),radius:9)
-                    .offset(x:CGFloat(cos(hue*2*Double.pi))*(side*0.5-14),y:CGFloat(sin(hue*2*Double.pi))*(side*0.5-14))
-                    .allowsHitTesting(false)
-                Circle().stroke(.clear,lineWidth:0).contentShape(Circle())
-                    .gesture(DragGesture(minimumDistance:0).onChanged { value in
-                        let center=CGPoint(x:side/2,y:side/2)
-                        let dx=value.location.x-center.x,dy=value.location.y-center.y
-                        hue=(atan2(dy,dx)/(2*Double.pi)+1).truncatingRemainder(dividingBy:1)
-                        apply(Color(hue:hue,saturation:0.94,brightness:1))
-                        UISelectionFeedbackGenerator().selectionChanged()
-                    })
-                VStack(spacing:3) {
-                    Text(lights.isOn ? "ON" : "OFF").font(.system(size:12,weight:.bold,design:.rounded)).tracking(2)
-                    Text("TAP TO POWER").font(.system(size:9,weight:.medium,design:.rounded)).tracking(1.2).foregroundStyle(.white.opacity(0.56))
-                }.allowsHitTesting(false)
+        VStack(spacing:14) {
+            HStack(spacing:14) {
+                Circle()
+                    .fill(lights.currentColor)
+                    .frame(width:54,height:54)
+                    .overlay(Circle().stroke(.white.opacity(0.2),lineWidth:1))
+                    .shadow(color:lights.currentColor.opacity(0.32),radius:14)
+                VStack(alignment:.leading,spacing:4) {
+                    Text(lights.isOn ? "Your light" : "Light is off")
+                        .font(.system(size:18,weight:.semibold,design:.rounded))
+                    Text("#\(lights.rgbHex)")
+                        .font(.system(size:13,weight:.medium,design:.monospaced))
+                        .foregroundStyle(.white.opacity(0.58))
+                }
+                Spacer()
+                ColorPicker("Choose color",selection:Binding(
+                    get:{lights.currentColor},
+                    set:{apply($0)}
+                ),supportsOpacity:false)
+                    .labelsHidden()
+                    .scaleEffect(1.18)
+                    .accessibilityLabel("Choose LED color")
+                Button {
+                    UIPasteboard.general.string="#\(lights.rgbHex)"
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                } label: {
+                    Image(systemName:"doc.on.doc")
+                        .font(.system(size:14,weight:.semibold))
+                        .frame(width:38,height:38)
+                        .background(.white.opacity(0.07),in:Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Copy HEX color")
             }
-            .frame(width:side,height:side)
-            .frame(maxWidth:.infinity,maxHeight:.infinity)
-        }
-        .frame(height:min(max(UIScreen.main.bounds.width-40,260),340))
-        .overlay(alignment:.bottom) {
             Button {
-                UIPasteboard.general.string="#\(lights.rgbHex)"
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                lights.togglePower()
+                UIImpactFeedbackGenerator(style:.medium).impactOccurred()
             } label: {
-                HStack(spacing:7) { RoundedRectangle(cornerRadius:3).fill(lights.currentColor).frame(width:11,height:11); Text("#\(lights.rgbHex)").font(.system(size:12,weight:.semibold,design:.rounded)).monospacedDigit(); Image(systemName:"doc.on.doc").font(.system(size:10)) }
-                    .padding(.horizontal,12).padding(.vertical,7).controlGlass(id:"hex-chip")
-            }.buttonStyle(.plain).offset(y:14)
+                Label(lights.isOn ? "Turn off" : "Turn on",systemImage:lights.isOn ? "power" : "power")
+                    .font(.system(size:14,weight:.semibold,design:.rounded))
+                    .frame(maxWidth:.infinity)
+                    .padding(.vertical,12)
+                    .background(lights.isOn ? accent.opacity(0.20) : .white.opacity(0.08),in:RoundedRectangle(cornerRadius:14))
+            }
+            .buttonStyle(.plain)
         }
+        .padding(16)
+        .panelGlass()
     }
 
     private var controlPanel: some View {
