@@ -567,30 +567,34 @@ struct ContentView: View {
 
     private func startScene(_ scene:LEDScene) {
         sceneTask?.cancel()
-        guard !scene.colors.isEmpty, lights.connectedName != nil else { return }
+        guard !scene.colors.isEmpty else { return }
+        guard lights.connectedName != nil else {
+            lights.status = "Connect your LED before starting a scene"
+            return
+        }
         lights.setBrightness(sceneBrightness)
         let speed=scene.category == "DIY" ? scene.speed : sceneSpeed
-        // BLE controllers generally need a modest write interval to avoid dropped updates.
-        let interval=max(0.22,1.8-speed*1.35)
+        let interval=max(0.16,0.30-speed*0.14)
         sceneTask=Task { @MainActor in
             var step=0
             while !Task.isCancelled {
                 let count=scene.colors.count
-                let base=scene.colors[(step/4)%count]
-                let next=scene.colors[((step/4)+1)%count]
-                let phase=Double(step%4)/3.0
+                let segment=step/12
+                let phase=Double(step%12)/11.0
+                let base=scene.colors[segment%count]
+                let next=scene.colors[(segment+1)%count]
                 let color:Color
                 switch scene.motion {
                 case "Rainbow":
-                    color=Color(hue:Double(step%24)/24.0,saturation:0.95,brightness:1)
+                    color=Color(hue:Double(step%72)/72.0,saturation:0.96,brightness:1)
                 case "Strobe":
                     color=step%2 == 0 ? base : Color(red:0,green:0,blue:0)
                 case "Candle flicker":
-                    let level=[0.72,1.0,0.84,0.94][step%4]
-                    color=ColorScience.mixColor(Color(red:0,green:0,blue:0),base,t:level)
+                    let levels:[Double]=[0.78,0.93,0.84,1.0,0.74,0.91,0.82,0.97,0.70,0.89,0.80,0.95]
+                    color=ColorScience.dim(base,level:levels[step%levels.count])
                 case "Pulse","Breathe":
-                    let level=0.30+0.70*(0.5-0.5*cos(Double(step%12)*Double.pi/6))
-                    color=ColorScience.mixColor(Color(red:0,green:0,blue:0),base,t:level)
+                    let wave=0.5-0.5*cos(Double(step%24)*2.0*Double.pi/24.0)
+                    color=ColorScience.dim(base,level:0.12+0.88*wave)
                 case "Aurora","Fade":
                     color=ColorScience.mixColor(base,next,t:phase)
                 default:
@@ -602,12 +606,11 @@ struct ContentView: View {
             }
         }
     }
-
     private func restartScene() { if let scene=selectedScene { startScene(scene) } }
     private func stopScene() { sceneTask?.cancel(); sceneTask=nil; selectedScene=nil }
 
     private func updateMusicColor() {
-        guard audio.isRunning,lights.connectedName != nil else { return }
+        guard audio.isRunning else { return }
         let bass=min(1,audio.bass*sensitivity*3.0)
         let mid=min(1,audio.mid*sensitivity*3.0)
         let high=min(1,audio.high*sensitivity*3.0)
@@ -625,7 +628,7 @@ struct ContentView: View {
     @State private var lastAudioWrite=0.0
     private func applyThrottled(_ color:Color) {
         let now=Date().timeIntervalSinceReferenceDate
-        guard now-lastAudioWrite>=0.22 else { return }
+        guard now-lastAudioWrite>=0.18 else { return }
         lastAudioWrite=now; apply(color)
     }
 
