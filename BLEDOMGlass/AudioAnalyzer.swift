@@ -10,6 +10,7 @@ final class AudioAnalyzer: ObservableObject {
     @Published private(set) var bass = 0.0
     @Published private(set) var mid = 0.0
     @Published private(set) var high = 0.0
+    @Published private(set) var inputLevel = 0.0
     @Published private(set) var isRunning = false
     @Published private(set) var message = "Microphone is off"
 
@@ -37,6 +38,7 @@ final class AudioAnalyzer: ObservableObject {
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: .measurement, options: [.mixWithOthers, .defaultToSpeaker])
+            try session.setPreferredIOBufferDuration(0.02)
             try session.setActive(true)
 
             let input = engine.inputNode
@@ -48,7 +50,7 @@ final class AudioAnalyzer: ObservableObject {
 
             generation += 1
             let activeGeneration = generation
-            input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+            input.installTap(onBus: 0, bufferSize: 512, format: format) { [weak self] buffer, _ in
                 guard let channel = buffer.floatChannelData?[0] else { return }
                 let count = Int(buffer.frameLength)
                 guard count > 32 else { return }
@@ -62,8 +64,8 @@ final class AudioAnalyzer: ObservableObject {
                     }
                 }
                 let crossingRate = Double(crossings) / Double(count)
-                let level = min(1.0, max(0.0, (Double(rms) - 0.002) * 14.0))
-                let highShare = min(1.0, crossingRate * 8.0)
+                let level = min(1.0, max(0.0, (Double(rms) - 0.001) * 32.0))
+                let highShare = min(1.0, crossingRate * 10.0)
                 let low = level * (1.0 - highShare * 0.72)
                 let high = level * highShare
                 let mid = level * (0.35 + 0.45 * (1.0 - abs(highShare - 0.5) * 2.0))
@@ -76,9 +78,10 @@ final class AudioAnalyzer: ObservableObject {
                     self.bass = self.bass * 0.55 + low * 0.45
                     self.mid = self.mid * 0.55 + mid * 0.45
                     self.high = self.high * 0.55 + high * 0.45
+                    self.inputLevel = self.inputLevel * 0.35 + level * 0.65
                     if !self.isRunning {
                         self.isRunning = true
-                        self.message = "Microphone active · reacting to nearby sound"
+                        self.message = "Microphone active · sound level detected"
                     }
                 }
             }
@@ -109,6 +112,7 @@ final class AudioAnalyzer: ObservableObject {
         bass = 0
         mid = 0
         high = 0
+        inputLevel = 0
         isRunning = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         message = "Microphone is off"
