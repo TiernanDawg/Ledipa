@@ -348,7 +348,7 @@ struct ContentView: View {
                     Text("Mode").font(.system(size:14,weight:.semibold,design:.rounded))
                     GlassEffectContainer(spacing:4) {
                         HStack(spacing:4) {
-                            ForEach(["Rhythm","Energic","Spectrum","Rolling"],id:\.self) { mode in
+                            ForEach(["Rhythm","Energy","Spectrum","Rolling"],id:\.self) { mode in
                                 Button(mode) { musicMode=mode; UISelectionFeedbackGenerator().selectionChanged() }
                                     .font(.system(size:11,weight:.semibold,design:.rounded))
                                     .frame(maxWidth:.infinity).padding(.vertical,11)
@@ -365,12 +365,14 @@ struct ContentView: View {
                         .font(.system(size:13,weight:.medium,design:.rounded))
                     Slider(value:$sensitivity,in:0.1...1).tint(accent)
                 }.padding(17).panelGlass()
-                Text(audio.message).font(.system(size:12,weight:.medium,design:.rounded)).foregroundStyle(.white.opacity(0.58)).frame(maxWidth:.infinity,alignment:.leading)
+                Text(lights.connectedName == nil ? "Microphone: \(audio.message) · Connect your LED to see color changes." : audio.message).font(.system(size:12,weight:.medium,design:.rounded)).foregroundStyle(.white.opacity(0.58)).frame(maxWidth:.infinity,alignment:.leading)
             }
         }
         .onChange(of:audio.bass) { _, _ in updateMusicColor() }
         .onChange(of:audio.mid) { _, _ in updateMusicColor() }
         .onChange(of:audio.high) { _, _ in updateMusicColor() }
+        .onChange(of:sensitivity) { _, _ in updateMusicColor() }
+        .onChange(of:musicMode) { _, _ in updateMusicColor() }
         .onDisappear { audio.stop() }
     }
 
@@ -379,7 +381,7 @@ struct ContentView: View {
             let phase=timeline.date.timeIntervalSinceReferenceDate
             let levels=(0..<32).map { i -> CGFloat in
                 let idle=0.12+0.07*sin(phase*1.7+Double(i)*0.55)
-                let active=audio.isRunning ? 0.08+audio.bass*CGFloat(0.75)+audio.mid*CGFloat(0.55)*CGFloat(abs(sin(Double(i)*0.4)))+audio.high*CGFloat(0.4)*CGFloat(abs(cos(Double(i)*0.8))) : idle
+                let active=audio.isRunning ? 0.04+audio.inputLevel*CGFloat(0.82)*(0.35+0.65*CGFloat(abs(sin(Double(i)*0.34+phase*2.2)))) : idle
                 return max(0.08,min(1,active))
             }
             HStack(alignment:.center,spacing:4) {
@@ -616,7 +618,7 @@ struct ContentView: View {
         let high=min(1,audio.high*sensitivity*3.0)
         let h:Double
         switch musicMode {
-        case "Energic": h=(0.02+bass*0.42).truncatingRemainder(dividingBy:1)
+        case "Energy": h=(0.02+bass*0.42).truncatingRemainder(dividingBy:1)
         case "Spectrum": h=(0.56+mid*0.34+high*0.1).truncatingRemainder(dividingBy:1)
         case "Rolling": h=(0.72+bass*0.18+mid*0.1).truncatingRemainder(dividingBy:1)
         default: h=0.56
