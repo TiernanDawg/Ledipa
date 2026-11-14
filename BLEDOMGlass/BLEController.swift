@@ -111,8 +111,19 @@ final class BLEController: NSObject, ObservableObject {
     }
 
     func connect(_ peripheral: CBPeripheral) {
+        guard central.state == .poweredOn else {
+            status = "Turn on Bluetooth to connect"
+            return
+        }
+        if activePeripheral?.identifier == peripheral.identifier,
+           connectedName != nil {
+            status = "Already connected"
+            return
+        }
         manualDisconnect = false
         reconnectAttempts = 0
+        pendingWrites.removeAll()
+        responseWriteInFlight = false
         UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: rememberedDeviceIDKey)
         UserDefaults.standard.set(peripheral.name ?? "BLEDOM LED", forKey: rememberedDeviceNameKey)
         objectWillChange.send()
@@ -126,7 +137,12 @@ final class BLEController: NSObject, ObservableObject {
 
     func disconnect() {
         manualDisconnect = true
-        guard let activePeripheral else { return }
+        guard let activePeripheral else {
+            connectedName = nil
+            status = "Disconnected"
+            return
+        }
+        status = "Disconnecting…"
         central.cancelPeripheralConnection(activePeripheral)
     }
 
@@ -277,14 +293,35 @@ extension BLEController: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        activePeripheral = peripheral
+        peripheral.delegate = self
+        writeCharacteristic = nil
+        pendingWrites.removeAll()
+        responseWriteInFlight = false
         connectedName = peripheral.name ?? "BLEDOM"
         status = "Connected · discovering controls"
         peripheral.discoverServices(Array(supportedServiceIDs))
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        status = "Connection failed — tap to retry"
+        if activePeripheral?.identifier == peripheral.identifier {
+            activePeripheral = nil
+            writeCharacteristic = nil
+            pendingWrites.removeAll()
+            responseWriteInFlight = false
+        }
         connectedName = nil
+        status = error.map { "Connection failed: \\($0.localizedDescription)" } ?? "Connection failed — tap to retry"
+        if autoConnectEnabled, !manualDisconnect, reconnectAttempts < 5, isPoweredOn {
+            reconnectAttempts += 1
+            let delay = min(20.0, pow(2.0, Double(reconnectAttempts)))
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, self.activePeripheral == nil, self.autoConnectEnabled, !self.manualDisconnect else { return }
+                self.attemptAutoConnect()
+            }
+        } else if manualDisconnect {
+            manualDisconnect = false
+        }
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
@@ -328,13 +365,17 @@ extension BLEController: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         guard error == nil else { status = "Could not discover LED controls"; return }
-        if let characteristic = service.characteristics?.first(where: { supportedWriteIDs.contains($0.uuid) && ($0.properties.contains(.write) || $0.properties.contains(.writeWithoutResponse)) }) {
+        if writeCharacteristic == nil,
+           let characteristic = service.characteristics?.first(where: {
+               supportedWriteIDs.contains($0.uuid) &&
+               ($0.properties.contains(.write) || $0.properties.contains(.writeWithoutResponse))
+           }) {
             writeCharacteristic = characteristic
             status = "Connected and ready"
-            if isOn { sendColor(); setBrightness(brightness) }
-        }
-        if writeCharacteristic == nil {
-            status = "Connected, but no compatible write control was found"
+            if isOn {
+                sendColor()
+                setBrightness(brightness)
+            }
         }
     }
 }
