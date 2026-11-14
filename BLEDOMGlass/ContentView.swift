@@ -13,6 +13,7 @@ struct ContentView: View {
 
     @State private var tab = 0
     @State private var hue = 0.57
+    @State private var wheelSaturation = 1.0
     @State private var temperature = 4200.0
     @State private var sensitivity = 0.65
     @State private var musicMode = "Rhythm"
@@ -160,13 +161,12 @@ struct ContentView: View {
                         .foregroundStyle(.white.opacity(0.58))
                 }
                 Spacer()
-                ColorPicker("Choose color",selection:Binding(
-                    get:{lights.currentColor},
-                    set:{apply($0)}
-                ),supportsOpacity:false)
-                    .labelsHidden()
-                    .scaleEffect(1.18)
-                    .accessibilityLabel("Choose LED color")
+                ColorWheel(hue: $hue, saturation: $wheelSaturation, selection: { selected in
+                    apply(selected)
+                })
+                .frame(width: 76, height: 76)
+                .accessibilityLabel("Color wheel")
+                .accessibilityHint("Drag around the wheel to choose a hue and saturation.")
                 Button {
                     UIPasteboard.general.string="#\(lights.rgbHex)"
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -734,6 +734,52 @@ private struct SavedScene: Codable {
     var colors: [RGBA]
     var motion: String
     var speed: Double
+}
+
+private struct ColorWheel: View {
+    @Binding var hue: Double
+    @Binding var saturation: Double
+    let selection: (Color) -> Void
+
+    var body: some View {
+        GeometryReader { geometry in
+            let side = min(geometry.size.width, geometry.size.height)
+            ZStack {
+                Circle()
+                    .fill(AngularGradient(
+                        colors: [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .pink, .red],
+                        center: .center
+                    ))
+                Circle()
+                    .fill(RadialGradient(colors: [.white, .white.opacity(0)], center: .center, startRadius: 0, endRadius: side * 0.5))
+                Circle().stroke(.white.opacity(0.75), lineWidth: 1)
+                Circle()
+                    .fill(Color(hue: hue, saturation: saturation, brightness: 1))
+                    .frame(width: 13, height: 13)
+                    .overlay(Circle().stroke(.white, lineWidth: 2))
+                    .shadow(color: .black.opacity(0.35), radius: 3)
+                    .offset(
+                        x: cos(hue * 2 * .pi - .pi / 2) * saturation * side * 0.40,
+                        y: sin(hue * 2 * .pi - .pi / 2) * saturation * side * 0.40
+                    )
+            }
+            .frame(width: side, height: side)
+            .contentShape(Circle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                let center = CGPoint(x: side / 2, y: side / 2)
+                let dx = value.location.x - center.x
+                let dy = value.location.y - center.y
+                let distance = min(1, hypot(dx, dy) / (side * 0.40))
+                var angle = atan2(dy, dx) + .pi / 2
+                if angle < 0 { angle += 2 * .pi }
+                hue = angle / (2 * .pi)
+                saturation = distance
+                selection(Color(hue: hue, saturation: saturation, brightness: 1))
+                UISelectionFeedbackGenerator().selectionChanged()
+            })
+        }
+        .aspectRatio(1, contentMode: .fit)
+    }
 }
 
 private struct TemperatureTrack:View {
