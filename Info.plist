@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-<dict/>
+<dict>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Morg’s LED uses Bluetooth to find, connect to, and control your LED strip.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Morg’s LED listens to nearby sound only when you enable Music Mode, so the strip can react to audio levels.</string>
+</dict>
 </plist>
