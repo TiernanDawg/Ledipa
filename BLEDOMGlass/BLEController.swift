@@ -311,7 +311,7 @@ extension BLEController: CBCentralManagerDelegate {
             responseWriteInFlight = false
         }
         connectedName = nil
-        status = error.map { "Connection failed: \\($0.localizedDescription)" } ?? "Connection failed — tap to retry"
+        status = error.map { "Connection failed: \($0.localizedDescription)" } ?? "Connection failed — tap to retry"
         if autoConnectEnabled, !manualDisconnect, reconnectAttempts < 5, isPoweredOn {
             reconnectAttempts += 1
             let delay = min(20.0, pow(2.0, Double(reconnectAttempts)))
