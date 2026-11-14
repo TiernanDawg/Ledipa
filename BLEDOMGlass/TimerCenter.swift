@@ -19,7 +19,7 @@ import Combine
         if let date = defaults.object(forKey: "morgs.timer.wakeDate") as? Date { scheduledTime = date }
     }
 
-    func sleepFade(brightness: @escaping (Double) -> Void, powerOff: @escaping () -> Void) {
+    func sleepFade(startingAt currentBrightness: Double = 100, brightness: @escaping (Double) -> Void, powerOff: @escaping () -> Void) {
         cancel(updateMessage: false)
         defaults.set(sleepMinutes, forKey: "morgs.timer.sleep")
         enabled = true
@@ -29,7 +29,7 @@ import Combine
             let steps = 60
             for step in stride(from: steps, through: 0, by: -1) {
                 if Task.isCancelled { return }
-                brightness(Double(step) / Double(steps) * 100)
+                brightness(max(0, min(100, currentBrightness)) * Double(step) / Double(steps))
                 do { try await Task.sleep(for: .seconds(duration / Double(steps))) }
                 catch { return }
             }
