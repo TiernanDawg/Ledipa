@@ -207,7 +207,7 @@ struct ContentView: View {
             }
             Rectangle().fill(.white.opacity(0.12)).frame(height:1)
             VStack(spacing:8) {
-                HStack { Text("Temperature").font(.system(size:14,weight:.semibold,design:.rounded)); Spacer(); Text("\(Int(temperature))K").font(.system(size:12,weight:.semibold,design:.rounded)).monospacedDigit().foregroundStyle(.white.opacity(0.7)) }
+                HStack { Text("Warm / cool tint").font(.system(size:14,weight:.semibold,design:.rounded)); Spacer(); Text(temperature < 4250 ? "Warm" : "Cool").font(.system(size:12,weight:.semibold,design:.rounded)).foregroundStyle(.white.opacity(0.7)) }
                 TemperatureTrack(value:$temperature,thumb:accent)
                 HStack { Text("Warm").foregroundStyle(.orange); Spacer(); Text("Cool").foregroundStyle(.cyan) }.font(.system(size:10,weight:.medium,design:.rounded))
             }
@@ -335,6 +335,23 @@ struct ContentView: View {
         screen("Music") {
             VStack(spacing:20) {
                 visualizer
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Microphone input").font(.system(size: 13, weight: .semibold, design: .rounded))
+                        Spacer()
+                        Text(audio.isRunning ? "\(Int(audio.inputLevel * 100))%" : "Off")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(.white.opacity(0.65))
+                    }
+                    ProgressView(value: audio.inputLevel)
+                        .tint(accent)
+                        .scaleEffect(x: 1, y: 1.25, anchor: .center)
+                        .accessibilityLabel("Microphone input level")
+                        .accessibilityValue("\(Int(audio.inputLevel * 100)) percent")
+                }
+                .padding(15)
+                .panelGlass()
                 Button {
                     if audio.isRunning { audio.stop(); stopScene() }
                     else { audio.start() }
@@ -368,11 +385,18 @@ struct ContentView: View {
                 Text(lights.connectedName == nil ? "Microphone: \(audio.message) · Connect your LED to see color changes." : audio.message).font(.system(size:12,weight:.medium,design:.rounded)).foregroundStyle(.white.opacity(0.58)).frame(maxWidth:.infinity,alignment:.leading)
             }
         }
+        .onChange(of:audio.inputLevel) { _, _ in updateMusicColor() }
         .onChange(of:audio.bass) { _, _ in updateMusicColor() }
         .onChange(of:audio.mid) { _, _ in updateMusicColor() }
         .onChange(of:audio.high) { _, _ in updateMusicColor() }
         .onChange(of:sensitivity) { _, _ in updateMusicColor() }
         .onChange(of:musicMode) { _, _ in updateMusicColor() }
+        .onChange(of:audio.message) { _, message in
+            if message.localizedCaseInsensitiveContains("unavailable") ||
+               message.localizedCaseInsensitiveContains("denied") {
+                audio.stop()
+            }
+        }
         .onDisappear { audio.stop() }
     }
 
