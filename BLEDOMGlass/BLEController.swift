@@ -324,3 +324,5 @@ extension BLEController: CBPeripheralDelegate {
         }
     }
 }
+
+extension BLEController: MorgsHardware {}
