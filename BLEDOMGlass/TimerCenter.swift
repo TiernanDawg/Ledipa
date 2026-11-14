@@ -24,7 +24,7 @@ import Combine
         defaults.set(sleepMinutes, forKey: "morgs.timer.sleep")
         enabled = true
         message = "Sleep fade running"
-        let duration = max(1, sleepMinutes) * 60
+        let duration = min(720, max(1, sleepMinutes)) * 60
         task = Task { @MainActor in
             let steps = 60
             for step in stride(from: steps, through: 0, by: -1) {
@@ -45,10 +45,19 @@ import Combine
         scheduledTime = date
         defaults.set(date, forKey: "morgs.timer.wakeDate")
         defaults.set(wakeMinutes, forKey: "morgs.timer.wake")
-        let target = date > Date() ? date : Calendar.current.nextDate(after: Date(), matching: Calendar.current.dateComponents([.hour, .minute], from: date), matchingPolicy: .nextTime) ?? date
+        let now = Date()
+        let target: Date
+        if date > now {
+            target = date
+        } else {
+            let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+            target = Calendar.current.nextDate(after: now, matching: components, matchingPolicy: .nextTime)
+                ?? Calendar.current.date(byAdding: .day, value: 1, to: date)
+                ?? now.addingTimeInterval(24 * 60 * 60)
+        }
         enabled = true
         message = "Wake-up scheduled for \(target.formatted(date: .omitted, time: .shortened)) · keep the app open"
-        let duration = max(1, wakeMinutes) * 60
+        let duration = min(720, max(1, wakeMinutes)) * 60
         task = Task { @MainActor in
             do { try await Task.sleep(for: .seconds(max(0, target.timeIntervalSinceNow))) }
             catch { return }
