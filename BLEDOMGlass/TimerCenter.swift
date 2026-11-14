@@ -20,7 +20,7 @@ import Combine
     }
 
     func sleepFade(brightness: @escaping (Double) -> Void, powerOff: @escaping () -> Void) {
-        task?.cancel()
+        cancel(updateMessage: false)
         defaults.set(sleepMinutes, forKey: "morgs.timer.sleep")
         enabled = true
         message = "Sleep fade running"
@@ -41,7 +41,7 @@ import Combine
     }
 
     func scheduleWake(at date: Date, brightness: @escaping (Double) -> Void, powerOn: @escaping () -> Void) {
-        task?.cancel()
+        cancel(updateMessage: false)
         scheduledTime = date
         defaults.set(date, forKey: "morgs.timer.wakeDate")
         defaults.set(wakeMinutes, forKey: "morgs.timer.wake")
@@ -52,7 +52,7 @@ import Combine
         task = Task { @MainActor in
             do { try await Task.sleep(for: .seconds(max(0, target.timeIntervalSinceNow))) }
             catch { return }
-            if Task.isCancelled { return }
+            guard !Task.isCancelled else { return }
             powerOn()
             let steps = 60
             for step in 0...steps {
@@ -67,10 +67,10 @@ import Combine
         }
     }
 
-    func cancel() {
+    func cancel(updateMessage: Bool = true) {
         task?.cancel()
         task = nil
         enabled = false
-        message = "Timer cancelled"
+        if updateMessage { message = "Timer cancelled" }
     }
 }
