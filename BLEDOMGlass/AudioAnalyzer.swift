@@ -50,7 +50,7 @@ final class AudioAnalyzer: ObservableObject {
 
             generation += 1
             let activeGeneration = generation
-            input.installTap(onBus: 0, bufferSize: 512, format: format) { [weak self] buffer, _ in
+            input.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] buffer, _ in
                 guard let channel = buffer.floatChannelData?[0] else { return }
                 let count = Int(buffer.frameLength)
                 guard count > 32 else { return }
