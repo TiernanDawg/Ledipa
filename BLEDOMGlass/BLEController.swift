@@ -74,6 +74,15 @@ final class BLEController: NSObject, ObservableObject {
     var rememberedDeviceName: String? { UserDefaults.standard.string(forKey: rememberedDeviceNameKey) }
 
     var currentColor: Color { Color(red: red, green: green, blue: blue) }
+    var lightState: LightState {
+        LightState(
+            name: connectedName ?? rememberedDeviceName ?? "LED Strip",
+            red: red, green: green, blue: blue,
+            brightness: brightness, isOn: isOn,
+            isConnected: connectedName != nil,
+            statusMessage: status
+        )
+    }
     var rgbHex: String {
         String(format: "%02X%02X%02X", Int(red * 255), Int(green * 255), Int(blue * 255))
     }
@@ -197,7 +206,15 @@ final class BLEController: NSObject, ObservableObject {
     }
 
     private func write(_ bytes: [UInt8], to peripheral: CBPeripheral, characteristic: CBCharacteristic) {
-        pendingWrites.append(Data(bytes))
+        let data = Data(bytes)
+        // Color and brightness are state updates: when BLE is congested, only
+        // the newest pending value matters. Preserve ordering for power commands.
+        if bytes.count > 2, bytes[2] == 0x05 || bytes[2] == 0x01 {
+            pendingWrites.removeAll { queued in
+                queued.count > 2 && queued[2] == bytes[2]
+            }
+        }
+        pendingWrites.append(data)
         drainWriteQueue(for: peripheral, characteristic: characteristic)
     }
 
