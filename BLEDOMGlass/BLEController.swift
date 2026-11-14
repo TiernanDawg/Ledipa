@@ -41,6 +41,8 @@ final class BLEController: NSObject, ObservableObject {
     private let stateKey = "morgs-led.last-state"
     private var manualDisconnect = false
     private var reconnectAttempts = 0
+    private var pendingWrites: [Data] = []
+    private var responseWriteInFlight = false
 
     override init() {
         super.init()
@@ -195,9 +197,25 @@ final class BLEController: NSObject, ObservableObject {
     }
 
     private func write(_ bytes: [UInt8], to peripheral: CBPeripheral, characteristic: CBCharacteristic) {
-        let data = Data(bytes)
-        let type: CBCharacteristicWriteType = characteristic.properties.contains(.writeWithoutResponse) ? .withoutResponse : .withResponse
-        peripheral.writeValue(data, for: characteristic, type: type)
+        pendingWrites.append(Data(bytes))
+        drainWriteQueue(for: peripheral, characteristic: characteristic)
+    }
+
+    /// Respect CoreBluetooth's back-pressure instead of flooding inexpensive LED controllers.
+    private func drainWriteQueue(for peripheral: CBPeripheral, characteristic: CBCharacteristic) {
+        if characteristic.properties.contains(.writeWithoutResponse) {
+            while !pendingWrites.isEmpty && peripheral.canSendWriteWithoutResponse {
+                let data = pendingWrites.removeFirst()
+                peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
+            }
+            return
+        }
+
+        guard !responseWriteInFlight, !pendingWrites.isEmpty,
+              characteristic.properties.contains(.write) else { return }
+        responseWriteInFlight = true
+        let data = pendingWrites.removeFirst()
+        peripheral.writeValue(data, for: characteristic, type: .withResponse)
     }
 }
 
@@ -242,6 +260,8 @@ extension BLEController: CBCentralManagerDelegate {
         connectedName = nil
         activePeripheral = nil
         writeCharacteristic = nil
+        pendingWrites.removeAll()
+        responseWriteInFlight = false
         status = error == nil ? "Disconnected" : "Connection lost — reconnecting"
         if autoConnectEnabled, !manualDisconnect, reconnectAttempts < 5, isPoweredOn {
             reconnectAttempts += 1
@@ -255,6 +275,19 @@ extension BLEController: CBCentralManagerDelegate {
 }
 
 extension BLEController: CBPeripheralDelegate {
+    func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
+        guard let characteristic = writeCharacteristic else { return }
+        drainWriteQueue(for: peripheral, characteristic: characteristic)
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        responseWriteInFlight = false
+        if let error {
+            status = "LED command failed: \(error.localizedDescription)"
+        }
+        drainWriteQueue(for: peripheral, characteristic: characteristic)
+    }
+
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard error == nil else { status = "Could not read controller services"; return }
         for service in peripheral.services ?? [] {
