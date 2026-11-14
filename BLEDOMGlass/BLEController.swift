@@ -179,11 +179,14 @@ final class BLEController: NSObject, ObservableObject {
     }
 
     func togglePower() {
+        // Do not persist a power-state change unless a controller is ready to
+        // receive it. This keeps the displayed and restored state truthful.
+        guard let peripheral = activePeripheral, let characteristic = writeCharacteristic else {
+            status = "Connect to your light first"
+            return
+        }
         isOn.toggle()
         persistState()
-        guard let peripheral = activePeripheral, let characteristic = writeCharacteristic else {
-            isOn.toggle(); status = "Connect to your light first"; return
-        }
         let frame: [UInt8] = isOn
             ? [0x7E, 0x00, 0x04, 0xF0, 0x00, 0x01, 0xFF, 0x00, 0xEF]
             : [0x7E, 0x00, 0x04, 0x00, 0x00, 0x00, 0xFF, 0x00, 0xEF]
