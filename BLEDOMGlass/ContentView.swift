@@ -66,6 +66,7 @@ struct ContentView: View {
         .onOpenURL { handleAutomationURL($0) }
         .onChange(of:lights.currentColor) { _, color in
             addRecent(color)
+            syncWheel(to: color)
         }
         .onChange(of:temperature) { _, kelvin in
             apply(approximateWhitePoint(kelvin: kelvin))
@@ -551,6 +552,16 @@ struct ContentView: View {
         }
     }
 
+    private func syncWheel(to color: Color) {
+        var selectedHue: CGFloat = 0
+        var selectedSaturation: CGFloat = 0
+        var brightness: CGFloat = 0
+        var alpha: CGFloat = 0
+        UIColor(color).getHue(&selectedHue, saturation: &selectedSaturation, brightness: &brightness, alpha: &alpha)
+        hue = Double(selectedHue)
+        wheelSaturation = Double(selectedSaturation)
+    }
+
     private func apply(_ color:Color) {
         // Keep the selected sRGB channels unchanged for the hardware command.
         let rgb=color.rgb
@@ -775,10 +786,13 @@ private struct ColorWheel: View {
                 hue = angle / (2 * .pi)
                 saturation = distance
                 selection(Color(hue: hue, saturation: saturation, brightness: 1))
-                UISelectionFeedbackGenerator().selectionChanged()
             })
         }
         .aspectRatio(1, contentMode: .fit)
+        .accessibilityElement()
+        .accessibilityLabel("Hue and saturation")
+        .accessibilityValue("Hue \(Int(hue * 360)) degrees, saturation \(Int(saturation * 100)) percent")
+        .accessibilityHint("Drag to select a color")
     }
 }
 
