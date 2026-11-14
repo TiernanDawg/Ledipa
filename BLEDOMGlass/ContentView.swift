@@ -426,10 +426,10 @@ struct ContentView: View {
                             timers.scheduleWake(at:timerDate,brightness:{lights.setBrightness($0)},powerOn:{if !lights.isOn {lights.togglePower()}})
                         }
                         timerTile("Sunset","sunset.fill",.purple) {
-                            timers.sleepFade(brightness:{lights.setBrightness($0)},powerOff:{if lights.isOn {lights.togglePower()}})
+                            timers.sleepFade(startingAt:lights.brightness,brightness:{lights.setBrightness($0)},powerOff:{if lights.isOn {lights.togglePower()}})
                         }
                         timerTile("Sleep","moon.zzz.fill",.indigo) {
-                            timers.sleepFade(brightness:{lights.setBrightness($0)},powerOff:{if lights.isOn {lights.togglePower()}})
+                            timers.sleepFade(startingAt:lights.brightness,brightness:{lights.setBrightness($0)},powerOff:{if lights.isOn {lights.togglePower()}})
                         }
                     }
                     HStack { Text("Fade duration"); Spacer(); Text("\(Int(timers.sleepMinutes)) min").monospacedDigit() }
