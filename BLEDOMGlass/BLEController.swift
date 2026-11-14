@@ -84,7 +84,16 @@ final class BLEController: NSObject, ObservableObject {
         )
     }
     var rgbHex: String {
-        String(format: "%02X%02X%02X", Int(red * 255), Int(green * 255), Int(blue * 255))
+        String(format: "%02X%02X%02X",
+               Int(normalizedChannel(red) * 255),
+               Int(normalizedChannel(green) * 255),
+               Int(normalizedChannel(blue) * 255))
+    }
+
+    /// BLE RGB frames require finite, normalized 8-bit channel values.
+    private func normalizedChannel(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        return min(1, max(0, value))
     }
 
     func scan() {
@@ -145,7 +154,9 @@ final class BLEController: NSObject, ObservableObject {
     }
 
     func setColor(red r: Double, green g: Double, blue b: Double) {
-        red = r; green = g; blue = b
+        red = normalizedChannel(r)
+        green = normalizedChannel(g)
+        blue = normalizedChannel(b)
         persistState()
         sendColor()
     }
@@ -153,17 +164,17 @@ final class BLEController: NSObject, ObservableObject {
     func sendColor() {
         guard let peripheral = activePeripheral, let characteristic = writeCharacteristic else { return }
         let frame: [UInt8] = [0x7E, 0x00, 0x05, 0x03,
-                              UInt8((red * 255).rounded()),
-                              UInt8((green * 255).rounded()),
-                              UInt8((blue * 255).rounded()), 0x00, 0xEF]
+                              UInt8((normalizedChannel(red) * 255).rounded()),
+                              UInt8((normalizedChannel(green) * 255).rounded()),
+                              UInt8((normalizedChannel(blue) * 255).rounded()), 0x00, 0xEF]
         write(frame, to: peripheral, characteristic: characteristic)
     }
 
     func setBrightness(_ value: Double) {
-        brightness = value
+        brightness = value.isFinite ? min(100, max(0, value)) : 0
         persistState()
         guard let peripheral = activePeripheral, let characteristic = writeCharacteristic else { return }
-        let amount = UInt8(min(100, max(0, Int(value.rounded()))))
+        let amount = UInt8(brightness.rounded())
         write([0x7E, 0x00, 0x01, amount, 0x00, 0x00, 0x00, 0x00, 0xEF], to: peripheral, characteristic: characteristic)
     }
 
