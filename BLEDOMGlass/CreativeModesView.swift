@@ -59,7 +59,7 @@ private final class AudioMeter: ObservableObject {
                 var sum: Float = 0
                 for i in 0..<count { sum += data[i] * data[i] }
                 let rms = sqrt(sum / Float(count))
-                let scaled = min(1.0, max(0.0, (Double(rms) - 0.008) * 12.0))
+                let scaled = min(1.0, max(0.0, (Double(rms) - 0.002) * 30.0))
                 DispatchQueue.main.async {
                     self?.level = (self?.level ?? 0) * 0.55 + scaled * 0.45
                 }
@@ -70,6 +70,11 @@ private final class AudioMeter: ObservableObject {
             available = true
             message = "Listening to nearby sound"
         } catch {
+            if engine.isRunning { engine.stop() }
+            engine.inputNode.removeTap(onBus: 0)
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            running = false
+            available = false
             message = "Could not start microphone: \(error.localizedDescription)"
         }
     }
@@ -86,7 +91,12 @@ private final class AudioMeter: ObservableObject {
         message = "Microphone is off"
     }
 
-    deinit { stop() }
+    deinit {
+        if engine.isRunning {
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+        }
+    }
 }
 
 struct CreativeModesView: View {
@@ -179,7 +189,7 @@ struct CreativeModesView: View {
         }
         .padding(19).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 27, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 27, style: .continuous).stroke(.white.opacity(0.16), lineWidth: 1))
-        .onReceive(Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()) { _ in tick() }
+        .onReceive(Timer.publish(every: 0.12, on: .main, in: .common).autoconnect()) { _ in tick() }
         .onDisappear { audio.stop(); mode = .off }
     }
 
@@ -213,8 +223,8 @@ struct CreativeModesView: View {
 
     private func tick() {
         guard mode != .off else { return }
-        phase += speed * 0.10
-        let beat = min(1, audio.level * 2.8)
+        phase += speed * 0.048
+        let beat = min(1, audio.level * 3.5)
         var r = 0.0, g = 0.0, b = 0.0
         switch mode {
         case .off: return
@@ -235,13 +245,13 @@ struct CreativeModesView: View {
             let flicker = max(0.35, min(1, 0.78 + sin(phase * 19) * 0.09 + sin(phase * 37) * 0.05))
             r = 1 * intensity; g = 0.38 * flicker * intensity; b = 0.07 * intensity
         case .party:
-            let h = Double(Int(phase * 5) % 6) / 6
+            let h = (phase * 0.72).truncatingRemainder(dividingBy: 1)
             let ui = UIColor(Color(hue: h, saturation: 1, brightness: intensity))
             var rr: CGFloat = 0, gg: CGFloat = 0, bb: CGFloat = 0, aa: CGFloat = 0
             ui.getRed(&rr, green: &gg, blue: &bb, alpha: &aa)
             r = Double(rr); g = Double(gg); b = Double(bb)
         case .musicPulse:
-            let brightness = max(0.05, min(1, 0.15 + beat * intensity))
+            let brightness = max(0.06, min(1, 0.10 + beat * intensity * 1.25))
             let ui = UIColor(Color(hue: hue, saturation: 0.88, brightness: brightness))
             var rr: CGFloat = 0, gg: CGFloat = 0, bb: CGFloat = 0, aa: CGFloat = 0
             ui.getRed(&rr, green: &gg, blue: &bb, alpha: &aa)
