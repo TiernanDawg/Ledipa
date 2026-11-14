@@ -575,36 +575,49 @@ struct ContentView: View {
             return
         }
         lights.setBrightness(sceneBrightness)
-        let speed=scene.category == "DIY" ? scene.speed : sceneSpeed
-        let interval=max(0.16,0.30-speed*0.14)
-        sceneTask=Task { @MainActor in
-            var step=0
+        let speed = scene.category == "DIY" ? scene.speed : sceneSpeed
+        // A complete color crossfade takes several seconds at normal speed.
+        // The slower BLE cadence avoids the rapid on/off appearance of a strobe.
+        let interval = 0.12 + (1.0 - speed) * 0.10
+        sceneTask = Task { @MainActor in
+            var frame = 0
             while !Task.isCancelled {
-                let count=scene.colors.count
-                let segment=step/12
-                let phase=Double(step%12)/11.0
-                let base=scene.colors[segment%count]
-                let next=scene.colors[(segment+1)%count]
-                let color:Color
+                let count = scene.colors.count
+                let framesPerColor = 32
+                let segment = frame / framesPerColor
+                let phase = Double(frame % framesPerColor) / Double(framesPerColor - 1)
+                let base = scene.colors[segment % count]
+                let next = scene.colors[(segment + 1) % count]
+                let smooth = phase * phase * (3.0 - 2.0 * phase)
+                let wave = 0.5 - 0.5 * cos(Double(frame % 64) * 2.0 * Double.pi / 64.0)
+                let color: Color
+
                 switch scene.motion {
                 case "Rainbow":
-                    color=Color(hue:Double(step%72)/72.0,saturation:0.96,brightness:1)
+                    color = Color(hue: Double(frame % 120) / 120.0, saturation: 0.94, brightness: 1.0)
                 case "Strobe":
-                    color=step%2 == 0 ? base : Color(red:0,green:0,blue:0)
+                    // Soft strobe: retain a visible floor instead of hard black cuts.
+                    let pulse = frame % 16 < 8 ? 1.0 : 0.42
+                    color = ColorScience.dim(base, level: pulse)
                 case "Candle flicker":
-                    let levels:[Double]=[0.78,0.93,0.84,1.0,0.74,0.91,0.82,0.97,0.70,0.89,0.80,0.95]
-                    color=ColorScience.dim(base,level:levels[step%levels.count])
-                case "Pulse","Breathe":
-                    let wave=0.5-0.5*cos(Double(step%24)*2.0*Double.pi/24.0)
-                    color=ColorScience.dim(base,level:0.12+0.88*wave)
-                case "Aurora","Fade":
-                    color=ColorScience.mixColor(base,next,t:phase)
+                    let levels: [Double] = [0.78,0.93,0.84,1.0,0.74,0.91,0.82,0.97,0.70,0.89,0.80,0.95]
+                    color = ColorScience.dim(base, level: levels[frame % levels.count])
+                case "Pulse":
+                    color = ColorScience.dim(base, level: 0.22 + 0.78 * wave)
+                case "Breathe":
+                    color = ColorScience.dim(base, level: 0.10 + 0.90 * wave)
+                case "Aurora", "Fade":
+                    let blended = ColorScience.mixColor(base, next, t: smooth)
+                    // Single-color scenes still animate through a gentle luminance envelope.
+                    let level = count == 1 ? 0.48 + 0.52 * wave : 0.92 + 0.08 * wave
+                    color = ColorScience.dim(blended, level: level)
                 default:
-                    color=ColorScience.mixColor(base,next,t:phase)
+                    color = ColorScience.mixColor(base, next, t: smooth)
                 }
+
                 apply(color)
-                step += 1
-                do { try await Task.sleep(for:.seconds(interval)) } catch { return }
+                frame += 1
+                do { try await Task.sleep(for: .seconds(interval)) } catch { return }
             }
         }
     }
@@ -613,24 +626,29 @@ struct ContentView: View {
 
     private func updateMusicColor() {
         guard audio.isRunning else { return }
-        let bass=min(1,audio.bass*sensitivity*3.0)
-        let mid=min(1,audio.mid*sensitivity*3.0)
-        let high=min(1,audio.high*sensitivity*3.0)
-        let h:Double
+        let level = min(1.0, audio.inputLevel * (0.65 + sensitivity * 3.2))
+        let bass = min(1.0, audio.bass * sensitivity * 4.0)
+        let mid = min(1.0, audio.mid * sensitivity * 4.0)
+        let high = min(1.0, audio.high * sensitivity * 4.0)
+        let hue: Double
         switch musicMode {
-        case "Energy": h=(0.02+bass*0.42).truncatingRemainder(dividingBy:1)
-        case "Spectrum": h=(0.56+mid*0.34+high*0.1).truncatingRemainder(dividingBy:1)
-        case "Rolling": h=(0.72+bass*0.18+mid*0.1).truncatingRemainder(dividingBy:1)
-        default: h=0.56
+        case "Energy":
+            hue = (0.02 + bass * 0.42 + level * 0.10).truncatingRemainder(dividingBy: 1)
+        case "Spectrum":
+            hue = (0.56 + mid * 0.30 + high * 0.14).truncatingRemainder(dividingBy: 1)
+        case "Rolling":
+            hue = (0.72 + bass * 0.18 + mid * 0.10 + level * 0.08).truncatingRemainder(dividingBy: 1)
+        default:
+            hue = (0.54 + level * 0.12).truncatingRemainder(dividingBy: 1)
         }
-        let brightness=0.18+bass*0.58+mid*0.18+high*0.06
-        applyThrottled(Color(hue:h,saturation:0.94,brightness:brightness))
+        let outputBrightness = min(1.0, 0.08 + level * 0.78 + bass * 0.10 + mid * 0.04)
+        applyThrottled(Color(hue: hue, saturation: 0.94, brightness: outputBrightness))
     }
 
     @State private var lastAudioWrite=0.0
     private func applyThrottled(_ color:Color) {
         let now=Date().timeIntervalSinceReferenceDate
-        guard now-lastAudioWrite>=0.18 else { return }
+        guard now-lastAudioWrite>=0.12 else { return }
         lastAudioWrite=now; apply(color)
     }
 
@@ -717,10 +735,11 @@ private extension Color {
         var alpha: CGFloat = 0
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
         let cgColor = resolved.cgColor.converted(to: colorSpace, intent: .defaultIntent, options: nil) ?? resolved.cgColor
-        let components = cgColor.components ?? [0,0,0,1]
+        let components = cgColor.components ?? []
         if components.count >= 3 {
             return SIMD3<Double>(Double(components[0]), Double(components[1]), Double(components[2]))
         }
+        resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
         return SIMD3<Double>(Double(red), Double(green), Double(blue))
     }
 
