@@ -67,8 +67,7 @@ struct ContentView: View {
             addRecent(color)
         }
         .onChange(of:temperature) { _, kelvin in
-            let t=(kelvin-2000)/4500
-            apply(Color(red:1.0-t*0.32,green:0.52+t*0.46,blue:0.58+t*0.42))
+            apply(approximateWhitePoint(kelvin: kelvin))
         }
         .onChange(of:sceneSpeed) { _, value in if selectedScene != nil { restartScene() } }
         .onChange(of:sceneBrightness) { _, value in lights.setBrightness(value) }
@@ -207,7 +206,7 @@ struct ContentView: View {
             }
             Rectangle().fill(.white.opacity(0.12)).frame(height:1)
             VStack(spacing:8) {
-                HStack { Text("Warm / cool tint").font(.system(size:14,weight:.semibold,design:.rounded)); Spacer(); Text(temperature < 4250 ? "Warm" : "Cool").font(.system(size:12,weight:.semibold,design:.rounded)).foregroundStyle(.white.opacity(0.7)) }
+                HStack { Text("White tint").font(.system(size:14,weight:.semibold,design:.rounded)); Spacer(); Text("≈ \(Int(temperature))K").font(.system(size:12,weight:.semibold,design:.rounded)).monospacedDigit().foregroundStyle(.white.opacity(0.7)) }
                 TemperatureTrack(value:$temperature,thumb:accent)
                 HStack { Text("Warm").foregroundStyle(.orange); Spacer(); Text("Cool").foregroundStyle(.cyan) }.font(.system(size:10,weight:.medium,design:.rounded))
             }
@@ -685,6 +684,29 @@ struct ContentView: View {
             }
         default: break
         }
+    }
+
+    /// Approximate black-body white point mapped to RGB for RGB-only strips.
+    /// This is a color tint simulation, not a true tunable-white channel.
+    private func approximateWhitePoint(kelvin: Double) -> Color {
+        let temperature = min(6500.0, max(2000.0, kelvin)) / 100.0
+        let red: Double
+        let green: Double
+        let blue: Double
+
+        if temperature <= 66 {
+            red = 255
+            green = 99.4708025861 * log(temperature) - 161.1195681661
+            blue = temperature <= 19 ? 0 : 138.5177312231 * log(temperature - 10) - 305.0447927307
+        } else {
+            red = 329.698727446 * pow(temperature - 60, -0.1332047592)
+            green = 288.1221695283 * pow(temperature - 60, -0.0755148492)
+            blue = 255
+        }
+
+        return Color(red: min(1, max(0, red / 255)),
+                     green: min(1, max(0, green / 255)),
+                     blue: min(1, max(0, blue / 255)))
     }
 
     private func restoreState() {
