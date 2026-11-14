@@ -391,12 +391,6 @@ struct ContentView: View {
         .onChange(of:audio.high) { _, _ in updateMusicColor() }
         .onChange(of:sensitivity) { _, _ in updateMusicColor() }
         .onChange(of:musicMode) { _, _ in updateMusicColor() }
-        .onChange(of:audio.message) { _, message in
-            if message.localizedCaseInsensitiveContains("unavailable") ||
-               message.localizedCaseInsensitiveContains("denied") {
-                audio.stop()
-            }
-        }
         .onDisappear { audio.stop() }
     }
 
