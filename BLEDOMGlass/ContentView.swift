@@ -562,10 +562,10 @@ struct ContentView: View {
         wheelSaturation = Double(selectedSaturation)
     }
 
-    private func apply(_ color:Color) {
+    private func apply(_ color:Color, persist:Bool = true) {
         // Keep the selected sRGB channels unchanged for the hardware command.
         let rgb=color.rgb
-        lights.setColor(red:rgb.x,green:rgb.y,blue:rgb.z)
+        lights.setColor(red:rgb.x,green:rgb.y,blue:rgb.z,persist:persist)
         addRecent(color)
     }
 
@@ -643,14 +643,14 @@ struct ContentView: View {
                     color = ColorScience.mixColor(base, next, t: smooth)
                 }
 
-                apply(color)
+                apply(color,persist:false)
                 frame += 1
                 do { try await Task.sleep(for: .seconds(interval)) } catch { return }
             }
         }
     }
     private func restartScene() { if let scene=selectedScene { startScene(scene) } }
-    private func stopScene() { sceneTask?.cancel(); sceneTask=nil; selectedScene=nil }
+    private func stopScene() { sceneTask?.cancel(); sceneTask=nil; selectedScene=nil; lights.persistCurrentState() }
 
     private func updateMusicColor() {
         guard audio.isRunning else { return }
@@ -677,7 +677,7 @@ struct ContentView: View {
     private func applyThrottled(_ color:Color) {
         let now=Date().timeIntervalSinceReferenceDate
         guard now-lastAudioWrite>=0.12 else { return }
-        lastAudioWrite=now; apply(color)
+        lastAudioWrite=now; apply(color,persist:false)
     }
 
     private func handleAutomationURL(_ url:URL) {
