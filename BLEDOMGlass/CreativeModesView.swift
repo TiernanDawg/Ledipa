@@ -25,83 +25,9 @@ private enum CreativeMode: String, CaseIterable, Identifiable {
     var needsMic: Bool { self == .musicPulse || self == .musicColor }
 }
 
-private final class AudioMeter: ObservableObject {
-    @Published var level: Double = 0
-    @Published var available = false
-    @Published var message = "Microphone is off"
-    private let engine = AVAudioEngine()
-    private var running = false
-
-    func start() {
-        guard !running else { return }
-        AVAudioApplication.requestRecordPermission { [weak self] granted in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                guard granted else { self.message = "Microphone permission denied"; return }
-                self.configure()
-            }
-        }
-    }
-
-    private func configure() {
-        guard !running else { return }
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .mixWithOthers])
-            try session.setActive(true)
-            let input = engine.inputNode
-            let format = input.outputFormat(forBus: 0)
-            guard format.channelCount > 0 else { message = "No microphone input available"; return }
-            input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-                guard let data = buffer.floatChannelData?[0] else { return }
-                let count = Int(buffer.frameLength)
-                guard count > 0 else { return }
-                var sum: Float = 0
-                for i in 0..<count { sum += data[i] * data[i] }
-                let rms = sqrt(sum / Float(count))
-                let scaled = min(1.0, max(0.0, (Double(rms) - 0.002) * 30.0))
-                DispatchQueue.main.async {
-                    self?.level = (self?.level ?? 0) * 0.55 + scaled * 0.45
-                }
-            }
-            engine.prepare()
-            try engine.start()
-            running = true
-            available = true
-            message = "Listening to nearby sound"
-        } catch {
-            if engine.isRunning { engine.stop() }
-            engine.inputNode.removeTap(onBus: 0)
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-            running = false
-            available = false
-            message = "Could not start microphone: \(error.localizedDescription)"
-        }
-    }
-
-    func stop() {
-        if running {
-            engine.inputNode.removeTap(onBus: 0)
-            engine.stop()
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        }
-        running = false
-        available = false
-        level = 0
-        message = "Microphone is off"
-    }
-
-    deinit {
-        if engine.isRunning {
-            engine.inputNode.removeTap(onBus: 0)
-            engine.stop()
-        }
-    }
-}
-
 struct CreativeModesView: View {
     @EnvironmentObject private var lights: BLEController
-    @StateObject private var audio = AudioMeter()
+    @StateObject private var audio = AudioAnalyzer()
     @State private var mode: CreativeMode = .off
     @State private var speed = 0.45
     @State private var intensity = 0.8
@@ -142,14 +68,14 @@ struct CreativeModesView: View {
                     HStack {
                         Label("Sound input", systemImage: "mic.fill").font(.system(size: 13, weight: .semibold))
                         Spacer()
-                        Text(audio.available ? "LIVE" : "OFF").font(.system(size: 9, weight: .bold)).tracking(1.2)
+                        Text(audio.isRunning ? "LIVE" : "OFF").font(.system(size: 9, weight: .bold)).tracking(1.2)
                             .foregroundStyle(audio.available ? .green : .white.opacity(0.45))
                     }
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             Capsule().fill(.white.opacity(0.08))
                             Capsule().fill(LinearGradient(colors: [.cyan, .purple, .pink], startPoint: .leading, endPoint: .trailing))
-                                .frame(width: max(4, geo.size.width * audio.level))
+                                .frame(width: max(4, geo.size.width * audio.inputLevel))
                         }
                     }.frame(height: 9)
                     HStack {
