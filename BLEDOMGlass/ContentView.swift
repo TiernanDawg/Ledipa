@@ -844,18 +844,42 @@ struct ContentView: View {
         }
     }
 
-    private func timerTile(_ title:String,_ symbol:String,_ tint:Color,_ action:@escaping()->Void)->some View {
+    private func timerTile(_ title: String, _ symbol: String, _ tint: Color, _ action: @escaping () -> Void) -> some View {
         Button {
-            guard lights.connectedName != nil else { showingDevices=true; return }
+            guard lights.connectedName != nil else { showingDevices = true; return }
             action()
-            UIImpactFeedbackGenerator(style:.medium).impactOccurred()
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         } label: {
-            VStack(spacing:8) {
-                Image(systemName:symbol).font(.system(size:19,weight:.semibold))
-                Text(title).font(.system(size:11,weight:.semibold))
-            }.frame(maxWidth:.infinity).padding(.vertical,13)
-                .controlGlass(id:"timer-\(title)",tint:tint.opacity(0.28))
-        }.buttonStyle(.plain)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Image(systemName: symbol)
+                        .font(.system(size: 19, weight: .semibold))
+                    Spacer()
+                    if timers.enabled {
+                        Image(systemName: "clock.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                            .opacity(0.78)
+                    }
+                }
+                Spacer(minLength: 0)
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(title == "Sunrise" ? "Gentle wake-up" : (title == "Evening" ? "Dim to 25%" : "Fade fully off"))
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity, minHeight: 82, alignment: .leading)
+            .padding(12)
+            .background(
+                LinearGradient(colors: [tint.opacity(0.28), tint.opacity(0.09)], startPoint: .topLeading, endPoint: .bottomTrailing),
+                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            )
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(tint.opacity(0.36), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(title == "Sunrise" ? "Schedule a gradual wake-up." : (title == "Evening" ? "Fade the light down to twenty-five percent." : "Fade the light out and turn it off."))
     }
 
     private var infoSheet: some View {
@@ -863,7 +887,7 @@ struct ContentView: View {
             List {
                 Section("Your LED strip") {
                     Text("This controller sends whole-strip RGB and brightness commands. It does not address independent segments or pixels.")
-                    Text("Temperature is an RGB approximation. The hardware protocol exposed by this strip does not provide a separate white-temperature channel.")
+                    Text("Warm–Cool balance is an RGB approximation. The hardware protocol exposed by this strip does not provide a separate white-temperature channel.")
                 }
                 Section("Music") {
                     Text("Music mode listens through the iPhone microphone. It cannot capture protected audio directly from Apple Music or other apps. Frequency bands are mapped into one whole-strip color.")
@@ -967,6 +991,11 @@ struct ContentView: View {
                     Text("If colors are swapped or inaccurate, try another channel order or frame format. The test displays red, green, and blue, then restores your previous color. Supported formats vary by controller firmware.")
                         .font(.system(size:11))
                         .foregroundStyle(.secondary)
+                }
+                Section("Troubleshooting") {
+                    RepairDiagnosticsView()
+                        .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                        .listRowBackground(Color.clear)
                 }
                 ForEach(lights.devices,id:\.identifier) { device in
                     Button { lights.connect(device); showingDevices=false } label: {
