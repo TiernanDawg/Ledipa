@@ -130,7 +130,7 @@ struct ContentView: View {
                 }.padding(.top,8)
                 content()
             }
-            .padding(.horizontal,20)
+            .padding(.horizontal, MorgDesign.pageInset)
             .padding(.top,4)
             .padding(.bottom,24)
             .frame(maxWidth:620)
@@ -331,24 +331,26 @@ struct ContentView: View {
     private var brightnessGauge: some View {
         GeometryReader { geometry in
             let width = max(1, geometry.size.width)
+            let level = CGFloat(lights.brightness) / 100
+            let fillWidth = width * level
             ZStack(alignment: .leading) {
                 Capsule().fill(.white.opacity(0.11))
                 Capsule()
                     .fill(LinearGradient(colors: [accent.opacity(0.42), accent, .white.opacity(0.88)], startPoint: .leading, endPoint: .trailing))
-                    .frame(width: max(10, width * lights.brightness / 100))
+                    .frame(width: max(10, fillWidth))
                     .shadow(color: accent.opacity(0.32), radius: 8)
                 Circle()
                     .fill(.white)
                     .frame(width: 18, height: 18)
                     .overlay(Circle().stroke(accent.opacity(0.8), lineWidth: 2))
                     .shadow(color: accent.opacity(0.55), radius: 7)
-                    .offset(x: max(0, min(width - 18, width * lights.brightness / 100 - 9)))
+                    .offset(x: max(0, min(width - 18, fillWidth - 9)))
             }
             .frame(height: 24)
             .frame(maxHeight: .infinity)
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                lights.setBrightness(max(1, min(100, value.location.x / width * 100)))
+                lights.setBrightness(Double(max(0, min(1, value.location.x / width)) * 100))
             })
         }
         .frame(height: 28)
@@ -1030,12 +1032,12 @@ struct ContentView: View {
     private func panelGlass()->some View {
         Group {
             if #available(iOS 26.0, *), !reduceTransparency {
-                RoundedRectangle(cornerRadius:24,style:.continuous).fill(.clear)
-                    .glassEffect(.regular,in:.rect(cornerRadius:24))
-                    .overlay(RoundedRectangle(cornerRadius:24,style:.continuous).stroke(.white.opacity(0.12),lineWidth:0.7))
+                RoundedRectangle(cornerRadius:MorgDesign.cardRadius,style:.continuous).fill(.clear)
+                    .glassEffect(.regular,in:.rect(cornerRadius:MorgDesign.cardRadius))
+                    .overlay(RoundedRectangle(cornerRadius:MorgDesign.cardRadius,style:.continuous).stroke(MorgDesign.hairline,lineWidth:0.7))
             } else {
-                RoundedRectangle(cornerRadius:24,style:.continuous).fill(.black.opacity(0.58))
-                    .overlay(RoundedRectangle(cornerRadius:24,style:.continuous).stroke(.white.opacity(0.18),lineWidth:1))
+                RoundedRectangle(cornerRadius:MorgDesign.cardRadius,style:.continuous).fill(.black.opacity(0.58))
+                    .overlay(RoundedRectangle(cornerRadius:MorgDesign.cardRadius,style:.continuous).stroke(.white.opacity(0.18),lineWidth:1))
             }
         }
     }
@@ -1091,8 +1093,7 @@ struct ContentView: View {
             return
         }
         lights.setBrightness(sceneBrightness)
-        let speed = scene.category == "DIY" ? scene.speed : sceneSpeed
-        let loopDuration = 10 * pow(180, 1 - max(0, min(1, speed)))
+        let loopDuration = 10 * pow(180, 1 - max(0, min(1, sceneSpeed)))
         let interval = min(1.0, max(0.18, loopDuration / 180.0))
         sceneTask = Task { @MainActor in
             var elapsed = 0.0
@@ -1144,10 +1145,7 @@ struct ContentView: View {
     }
 
     private func restartScene() {
-        if let scene = selectedScene {
-            scenePaused = false
-            startScene(scene)
-        }
+        if let scene = selectedScene { startScene(scene) }
     }
 
     private func stopScene() {
