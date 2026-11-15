@@ -18,6 +18,10 @@ struct ContentView: View {
     @State private var sensitivity = 0.65
     @State private var musicMode = "Rhythm"
     @State private var selectedCategory = "All"
+    @State private var sceneShelf = "All scenes"
+    @State private var favoriteSceneIDs = Set(UserDefaults.standard.stringArray(forKey: "morgs.scene-favorites") ?? [])
+    @State private var recentSceneIDs = UserDefaults.standard.stringArray(forKey: "morgs.scene-recent") ?? []
+    @State private var scenePaused = false
     @State private var sceneSpeed = 0.45
     @State private var sceneBrightness = 80.0
     @State private var selectedScene: LEDScene?
@@ -57,10 +61,10 @@ struct ContentView: View {
             .modifier(MinimizeTabBar())
         }
         .preferredColorScheme(.dark)
-        .animation(reduceMotion ? nil : .spring(response:0.42,dampingFraction:0.82),value:tab)
+        .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86),value:tab)
         .sheet(isPresented:$showingDevices) { deviceSheet }
         .sheet(isPresented:$showDIY) { diySheet.presentationDetents([.large]) }
-        .sheet(isPresented:$showScenePlayer) { scenePlayerSheet.presentationDetents([.medium]) }
+        .fullScreenCover(isPresented:$showScenePlayer) { scenePlayerSheet }
         .sheet(isPresented:$showingInfo) { infoSheet.presentationDetents([.medium,.large]) }
         .onAppear { restoreState() }
         .onOpenURL { handleAutomationURL($0) }
@@ -76,26 +80,31 @@ struct ContentView: View {
     }
 
     private var driftingBackground: some View {
-        TimelineView(.animation(minimumInterval:reduceMotion ? 1 : 0.08,paused:reduceMotion)) { timeline in
-            let t=timeline.date.timeIntervalSinceReferenceDate
-            let c=lights.isOn ? accent : Color(red:0.025,green:0.03,blue:0.055)
-            MeshGradient(width:3,height:3,points:[
-                .init(0,0),.init(0.5,0),.init(1,0),
-                .init(0,0.5),.init(Float(0.5+0.11*sin(t*0.10)),Float(0.5+0.10*cos(t*0.09))),.init(1,0.5),
-                .init(0,1),.init(0.5,1),.init(1,1)
-            ],colors:[
-                Color(red:0.012,green:0.016,blue:0.035),c.opacity(0.26),Color(red:0.025,green:0.016,blue:0.05),
-                c.opacity(0.16),Color(red:0.018,green:0.025,blue:0.052),Color(red:0.045,green:0.018,blue:0.065),
-                Color(red:0.018,green:0.025,blue:0.05),c.opacity(0.20),Color(red:0.012,green:0.018,blue:0.04)
-            ])
-        }.ignoresSafeArea()
+        ZStack {
+            Color(red: 0.018, green: 0.022, blue: 0.040)
+            RadialGradient(
+                colors: [accent.opacity(lights.isOn ? 0.20 : 0.055), .clear],
+                center: .topTrailing,
+                startRadius: 8,
+                endRadius: 520
+            )
+            RadialGradient(
+                colors: [Color.indigo.opacity(0.10), .clear],
+                center: .bottomLeading,
+                startRadius: 0,
+                endRadius: 430
+            )
+        }
+        .ignoresSafeArea()
+        .animation(.easeInOut(duration: 0.45), value: lights.currentColor)
+        .animation(.easeInOut(duration: 0.35), value: lights.isOn)
     }
 
     private func screen<Content:View>(_ title:String,@ViewBuilder content:()->Content)->some View {
         ScrollView(showsIndicators:false) {
             VStack(alignment:.leading,spacing:16) {
                 HStack(alignment:.center) {
-                    Text(title).font(.system(size:30,weight:.bold,design:.rounded)).tracking(-0.8)
+                    Text(title).font(.system(size:30,weight:.bold)).tracking(-0.8)
                     Spacer(minLength:8)
                     GlassEffectContainer(spacing:8) {
                         HStack(spacing:8) {
@@ -128,7 +137,7 @@ struct ContentView: View {
             HStack(spacing:8) {
                 Circle().fill(lights.connectedName == nil ? (lights.status.localizedCaseInsensitiveContains("connect") ? .orange : .gray) : .green).frame(width:7,height:7)
                 Text(lights.connectedName ?? (lights.status.localizedCaseInsensitiveContains("connect") ? "Connecting" : "Not connected"))
-                    .font(.system(size:12,weight:.semibold,design:.rounded)).lineLimit(1)
+                    .font(.system(size:12,weight:.semibold)).lineLimit(1)
                 Image(systemName:"chevron.down").font(.system(size:9,weight:.bold)).opacity(0.65)
             }
             .padding(.horizontal,12).padding(.vertical,9)
@@ -147,73 +156,188 @@ struct ContentView: View {
     }
 
     private var colorHero: some View {
-        VStack(spacing:14) {
-            HStack(spacing:14) {
-                Circle()
-                    .fill(lights.currentColor)
-                    .frame(width:54,height:54)
-                    .overlay(Circle().stroke(.white.opacity(0.2),lineWidth:1))
-                    .shadow(color:lights.currentColor.opacity(0.32),radius:14)
-                VStack(alignment:.leading,spacing:4) {
-                    Text(lights.isOn ? "Your light" : "Light is off")
-                        .font(.system(size:18,weight:.semibold,design:.rounded))
+        VStack(spacing: 18) {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("LIGHT CONTROL")
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(1.8)
+                        .foregroundStyle(.white.opacity(0.52))
+                    Text(lights.isOn ? "Set the mood." : "Your light is off.")
+                        .font(.system(size: 25, weight: .bold))
+                        .tracking(-0.6)
                     Text("#\(lights.rgbHex)")
-                        .font(.system(size:13,weight:.medium,design:.monospaced))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.58))
                 }
                 Spacer()
-                ColorWheel(hue: $hue, saturation: $wheelSaturation, selection: { selected in
-                    apply(selected)
-                })
-                .frame(width: 76, height: 76)
-                .accessibilityLabel("Color wheel")
-                .accessibilityHint("Drag around the wheel to choose a hue and saturation.")
                 Button {
-                    UIPasteboard.general.string="#\(lights.rgbHex)"
+                    UIPasteboard.general.string = "#\(lights.rgbHex)"
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                 } label: {
-                    Image(systemName:"doc.on.doc")
-                        .font(.system(size:14,weight:.semibold))
-                        .frame(width:38,height:38)
-                        .background(.white.opacity(0.07),in:Circle())
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 42, height: 42)
+                        .background(.white.opacity(0.075), in: Circle())
+                        .overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 1))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Copy HEX color")
             }
+
+            ZStack {
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [lights.currentColor.opacity(lights.isOn ? 0.42 : 0.12), .clear],
+                            center: .center,
+                            startRadius: 20,
+                            endRadius: 146
+                        )
+                    )
+                    .frame(width: 292, height: 292)
+                    .blur(radius: 18)
+                ColorWheel(hue: $hue, saturation: $wheelSaturation) { selected in
+                    apply(selected, persist: false)
+                }
+                .frame(width: 224, height: 224)
+                .accessibilityLabel("Color selector")
+                .accessibilityHint("Drag around the wheel to choose hue and saturation.")
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 2)
+
+            HStack(spacing: 11) {
+                Circle()
+                    .fill(lights.currentColor)
+                    .frame(width: 14, height: 14)
+                    .overlay(Circle().stroke(.white.opacity(0.45), lineWidth: 1))
+                    .shadow(color: lights.currentColor.opacity(0.7), radius: 9)
+                Text(lights.isOn ? "Selected color" : "Color selection")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Text("Drag to adjust")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.48))
+            }
+
             Button {
                 lights.togglePower()
-                UIImpactFeedbackGenerator(style:.medium).impactOccurred()
+                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
             } label: {
-                Label(lights.isOn ? "Turn off" : "Turn on",systemImage:lights.isOn ? "power" : "power")
-                    .font(.system(size:14,weight:.semibold,design:.rounded))
-                    .frame(maxWidth:.infinity)
-                    .padding(.vertical,12)
-                    .background(lights.isOn ? accent.opacity(0.20) : .white.opacity(0.08),in:RoundedRectangle(cornerRadius:14))
+                HStack(spacing: 10) {
+                    Image(systemName: "power")
+                        .font(.system(size: 15, weight: .bold))
+                    Text(lights.isOn ? "Turn light off" : "Turn light on")
+                        .font(.system(size: 15, weight: .semibold))
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 12, weight: .bold))
+                        .opacity(0.7)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
+                .frame(maxWidth: .infinity, minHeight: 54)
+                .background(
+                    LinearGradient(
+                        colors: lights.isOn
+                            ? [accent.opacity(0.78), accent.opacity(0.38)]
+                            : [Color.white.opacity(0.13), Color.white.opacity(0.07)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                )
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(0.18), lineWidth: 1))
+                .shadow(color: lights.isOn ? accent.opacity(0.20) : .clear, radius: 18, y: 5)
             }
             .buttonStyle(.plain)
+            .accessibilityHint("Toggles the connected LED strip.")
         }
-        .padding(16)
+        .padding(20)
         .panelGlass()
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(accent.opacity(lights.isOn ? 0.18 : 0.08), lineWidth: 1))
+        .animation(.spring(response: 0.42, dampingFraction: 0.88), value: lights.isOn)
     }
 
     private var controlPanel: some View {
-        VStack(spacing:16) {
-            HStack(spacing:12) {
-                Image(systemName:"sun.min").font(.system(size:14)).foregroundStyle(.white.opacity(0.65))
-                Slider(value:Binding(get:{lights.brightness},set:{lights.setBrightness($0)}),in:1...100)
-                    .tint(accent)
-                Image(systemName:"sun.max.fill").font(.system(size:14)).foregroundStyle(.white.opacity(0.85))
-                Text("\(Int(lights.brightness))%").font(.system(size:13,weight:.bold,design:.rounded)).monospacedDigit().frame(width:38,alignment:.trailing)
+        VStack(alignment: .leading, spacing: 19) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label("Brightness", systemImage: "sun.max.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                    Spacer()
+                    Text("\(Int(lights.brightness))%")
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .monospacedDigit()
+                        .foregroundStyle(.white.opacity(0.82))
+                }
+                brightnessGauge
             }
-            Rectangle().fill(.white.opacity(0.12)).frame(height:1)
-            VStack(spacing:8) {
-                HStack { Text("White tint").font(.system(size:14,weight:.semibold,design:.rounded)); Spacer(); Text("≈ \(Int(temperature))K").font(.system(size:12,weight:.semibold,design:.rounded)).monospacedDigit().foregroundStyle(.white.opacity(0.7)) }
-                TemperatureTrack(value:$temperature,thumb:accent)
-                HStack { Text("Warm").foregroundStyle(.orange); Spacer(); Text("Cool").foregroundStyle(.cyan) }.font(.system(size:10,weight:.medium,design:.rounded))
+
+            Rectangle().fill(.white.opacity(0.11)).frame(height: 1)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("Warm–Cool balance", systemImage: "thermometer.medium")
+                        .font(.system(size: 14, weight: .semibold))
+                    Spacer()
+                    Text("≈ \(Int(temperature))K")
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .monospacedDigit()
+                        .foregroundStyle(.white.opacity(0.68))
+                }
+                TemperatureTrack(value: $temperature, thumb: accent)
+                    .frame(height: 30)
+                HStack {
+                    Label("Warm", systemImage: "sun.max.fill").foregroundStyle(.orange)
+                    Spacer()
+                    Label("Cool", systemImage: "snowflake").foregroundStyle(.cyan)
+                }
+                .font(.system(size: 10, weight: .medium))
+            }
+            Text("Simulated with RGB color. Your strip does not have a separate white channel.")
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.43))
+        }
+        .padding(18)
+        .panelGlass()
+    }
+
+    private var brightnessGauge: some View {
+        GeometryReader { geometry in
+            let width = max(1, geometry.size.width)
+            ZStack(alignment: .leading) {
+                Capsule().fill(.white.opacity(0.11))
+                Capsule()
+                    .fill(LinearGradient(colors: [accent.opacity(0.42), accent, .white.opacity(0.88)], startPoint: .leading, endPoint: .trailing))
+                    .frame(width: max(10, width * lights.brightness / 100))
+                    .shadow(color: accent.opacity(0.32), radius: 8)
+                Circle()
+                    .fill(.white)
+                    .frame(width: 18, height: 18)
+                    .overlay(Circle().stroke(accent.opacity(0.8), lineWidth: 2))
+                    .shadow(color: accent.opacity(0.55), radius: 7)
+                    .offset(x: max(0, min(width - 18, width * lights.brightness / 100 - 9)))
+            }
+            .frame(height: 24)
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                lights.setBrightness(max(1, min(100, value.location.x / width * 100)))
+            })
+        }
+        .frame(height: 28)
+        .accessibilityElement()
+        .accessibilityLabel("Brightness")
+        .accessibilityValue("\(Int(lights.brightness)) percent")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: lights.setBrightness(min(100, lights.brightness + 5))
+            case .decrement: lights.setBrightness(max(1, lights.brightness - 5))
+            @unknown default: break
             }
         }
-        .padding(17)
-        .panelGlass()
     }
 
     private var colorsSection: some View {
@@ -222,7 +346,7 @@ struct ContentView: View {
             if !palette.isEmpty || !favorites.isEmpty {
                 VStack(alignment:.leading,spacing:11) {
                     HStack {
-                        Text("Colors").font(.system(size:19,weight:.bold,design:.rounded))
+                        Text("Colors").font(.system(size:19,weight:.bold))
                         Spacer()
                         Button {
                             let color=lights.currentColor
@@ -251,84 +375,291 @@ struct ContentView: View {
 
     private var scenes: some View {
         screen("Scenes") {
-            ScrollView(.horizontal,showsIndicators:false) {
-                HStack(spacing:8) {
-                    ForEach(categories,id:\.self) { category in
-                        Button(category) { selectedCategory=category }
-                            .font(.system(size:12,weight:.semibold,design:.rounded))
-                            .padding(.horizontal,13).padding(.vertical,8)
-                            .controlGlass(id:"category-\(category)",tint:selectedCategory == category ? accent.opacity(0.32) : .clear)
+            VStack(alignment: .leading, spacing: 16) {
+                Picker("Scene collection", selection: $sceneShelf) {
+                    Text("All scenes").tag("All scenes")
+                    Text("Favorites").tag("Favorites")
+                    Text("Recently used").tag("Recently used")
+                }
+                .pickerStyle(.segmented)
+                .tint(accent)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(categories, id: \.self) { category in
+                            Button(category) {
+                                withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+                                    selectedCategory = category
+                                }
+                                UISelectionFeedbackGenerator().selectionChanged()
+                            }
+                            .font(.system(size: 12, weight: .semibold))
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 9)
+                            .foregroundStyle(selectedCategory == category ? .white : .white.opacity(0.7))
+                            .controlGlass(id: "category-\(category)", tint: selectedCategory == category ? accent.opacity(0.34) : .clear)
+                        }
                     }
                 }
-            }
-            LazyVGrid(columns:[GridItem(.flexible(),spacing:12),GridItem(.flexible(),spacing:12)],spacing:12) {
-                ForEach(visibleScenes) { scene in
-                    sceneCard(scene)
+
+                HStack(alignment: .firstTextBaseline) {
+                    Text(sceneShelf == "Favorites" ? "Your favorites" : (sceneShelf == "Recently used" ? "Recently played" : "Made for your space"))
+                        .font(.system(size: 20, weight: .bold))
+                    Spacer()
+                    Text("\(visibleScenes.count) scenes")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.48))
                 }
+
+                if visibleScenes.isEmpty {
+                    VStack(spacing: 10) {
+                        Image(systemName: sceneShelf == "Favorites" ? "star" : "clock.arrow.circlepath")
+                            .font(.system(size: 27, weight: .light))
+                            .foregroundStyle(accent)
+                        Text(sceneShelf == "Favorites" ? "No favorites yet" : "No recent scenes")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text(sceneShelf == "Favorites" ? "Tap the star on a scene to save it here." : "Scenes you play will appear here.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.52))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 32)
+                    .panelGlass()
+                } else {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 13) {
+                        ForEach(visibleScenes) { scene in
+                            sceneCard(scene)
+                        }
+                    }
+                }
+
+                Button { showDIY = true } label: {
+                    Label("Create your own scene", systemImage: "plus")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 15)
+                        .controlGlass(id: "create-scene", tint: accent.opacity(0.18))
+                }
+                .buttonStyle(.plain)
             }
-            Button { showDIY=true } label: {
-                Label("Create a scene",systemImage:"plus").font(.system(size:14,weight:.semibold,design:.rounded))
-                    .frame(maxWidth:.infinity).padding(.vertical,14).controlGlass(id:"create-scene",tint:accent.opacity(0.15))
-            }.buttonStyle(.plain)
         }
     }
 
-    private func sceneCard(_ scene:LEDScene)->some View {
-        let active=selectedScene?.id == scene.id
-        return Button {
-            selectedScene=scene
-            sceneSpeed=scene.speed
-            startScene(scene)
-            UIImpactFeedbackGenerator(style:.light).impactOccurred()
-        } label: {
-            ZStack(alignment:.topLeading) {
-                TimelineView(.animation(minimumInterval:reduceMotion ? 1 : 0.08,paused:reduceMotion)) { timeline in
-                    let phase=timeline.date.timeIntervalSinceReferenceDate*(0.18+scene.speed*0.28)
-                    let colors=scene.colors.isEmpty ? [.black] : scene.colors
-                    let rotated=colors.enumerated().sorted{($0.offset+Int(phase*10))%colors.count < ($1.offset+Int(phase*10))%colors.count}.map{$0.element}
-                    LinearGradient(colors:rotated+Array(rotated.reversed()),startPoint:.topLeading,endPoint:.bottomTrailing)
-                        .overlay(alignment:.bottomTrailing) {
-                            Circle().fill(.white.opacity(0.22)).frame(width:70,height:70).blur(radius:24).offset(x:15,y:20)
+    private func sceneCard(_ scene: LEDScene) -> some View {
+        let active = selectedScene?.id == scene.id
+        let favorite = favoriteSceneIDs.contains(scene.id)
+        let colors = scene.colors.isEmpty ? [Color.black] : scene.colors
+        return ZStack(alignment: .topTrailing) {
+            Button {
+                selectedScene = scene
+                sceneSpeed = scene.speed
+                scenePaused = false
+                recentSceneIDs.removeAll { $0 == scene.id }
+                recentSceneIDs.insert(scene.id, at: 0)
+                recentSceneIDs = Array(recentSceneIDs.prefix(12))
+                UserDefaults.standard.set(recentSceneIDs, forKey: "morgs.scene-recent")
+                startScene(scene)
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            } label: {
+                VStack(alignment: .leading, spacing: 0) {
+                    ZStack(alignment: .bottomLeading) {
+                        LinearGradient(colors: colors + Array(colors.reversed()), startPoint: .topLeading, endPoint: .bottomTrailing)
+                        Circle()
+                            .fill(colors.first?.opacity(0.78) ?? .white.opacity(0.3))
+                            .frame(width: 112, height: 112)
+                            .blur(radius: 34)
+                            .offset(x: 75, y: -28)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        Image(systemName: scene.symbol)
+                            .font(.system(size: 23, weight: .light))
+                            .foregroundStyle(.white.opacity(0.95))
+                            .padding(15)
+                        HStack(spacing: 5) {
+                            Circle().fill(active ? .green : .white.opacity(0.7)).frame(width: 6, height: 6)
+                            Text(active ? (scenePaused ? "PAUSED" : "PLAYING") : scene.category.uppercased())
+                                .font(.system(size: 8, weight: .bold))
+                                .tracking(1)
                         }
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 7)
+                        .background(.black.opacity(0.24), in: Capsule())
+                        .padding(10)
+                    }
+                    .frame(height: 104)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(scene.name)
+                            .font(.system(size: 14, weight: .semibold))
+                            .lineLimit(1)
+                        Text(scene.motion == "Fade" ? "Color atmosphere" : scene.motion)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.48))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 11)
+                    .background(.black.opacity(0.16))
                 }
-                Image(systemName:scene.symbol).font(.system(size:15,weight:.semibold)).foregroundStyle(.white).padding(11)
-                    .shadow(color:.black.opacity(0.45),radius:5)
-                VStack { Spacer(); HStack {
-                    Text(scene.name).font(.system(size:13,weight:.semibold,design:.rounded)).lineLimit(1)
-                    Spacer(minLength:2)
-                    if active { Image(systemName:"waveform").font(.system(size:11,weight:.bold)) }
-                }.padding(.horizontal,11).padding(.vertical,9).background(.ultraThinMaterial,in:Capsule()).padding(8) }
+                .clipShape(RoundedRectangle(cornerRadius: 19, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 19, style: .continuous).stroke(active ? accent.opacity(0.95) : .white.opacity(0.12), lineWidth: active ? 2 : 1))
+                .shadow(color: active ? accent.opacity(0.22) : .clear, radius: 14, y: 4)
+                .contentShape(RoundedRectangle(cornerRadius: 19, style: .continuous))
             }
-            .aspectRatio(1.3,contentMode:.fit)
-            .clipShape(RoundedRectangle(cornerRadius:20,style:.continuous))
-            .overlay(RoundedRectangle(cornerRadius:20,style:.continuous).stroke(active ? accent : .white.opacity(0.13),lineWidth:active ? 2.5 : 1))
-            .shadow(color:active ? accent.opacity(0.45) : .clear,radius:14)
-        }.buttonStyle(.plain)
+            .buttonStyle(.plain)
+
+            Button {
+                if favorite { favoriteSceneIDs.remove(scene.id) }
+                else { favoriteSceneIDs.insert(scene.id) }
+                UserDefaults.standard.set(Array(favoriteSceneIDs), forKey: "morgs.scene-favorites")
+                UISelectionFeedbackGenerator().selectionChanged()
+            } label: {
+                Image(systemName: favorite ? "star.fill" : "star")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(favorite ? .yellow : .white)
+                    .frame(width: 32, height: 32)
+                    .background(.black.opacity(0.38), in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.24), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .padding(9)
+            .accessibilityLabel(favorite ? "Remove \(scene.name) from favorites" : "Add \(scene.name) to favorites")
+        }
+        .accessibilityElement(children: .contain)
     }
 
     private var sceneDock: some View {
         HStack(spacing:12) {
             Image(systemName:selectedScene?.symbol ?? "sparkles").font(.system(size:16,weight:.semibold)).foregroundStyle(accent)
             VStack(alignment:.leading,spacing:2) {
-                Text(selectedScene?.name ?? "Scene").font(.system(size:13,weight:.semibold,design:.rounded)).lineLimit(1)
-                Text("WHOLE STRIP").font(.system(size:9,weight:.medium,design:.rounded)).tracking(1).foregroundStyle(.white.opacity(0.55))
+                Text(selectedScene?.name ?? "Scene").font(.system(size:13,weight:.semibold)).lineLimit(1)
+                Text("WHOLE STRIP").font(.system(size:9,weight:.medium)).tracking(1).foregroundStyle(.white.opacity(0.55))
             }
             Spacer()
-            Button { showScenePlayer=true } label: { Image(systemName:"slider.horizontal.3").frame(width:34,height:34).controlGlass(id:"scene-settings") }.buttonStyle(.plain)
-            Button { stopScene() } label: { Image(systemName:"stop.fill").frame(width:34,height:34).controlGlass(id:"scene-stop") }.buttonStyle(.plain)
+            Button { showScenePlayer = true } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").frame(width: 38, height: 38).controlGlass(id: "scene-focus") }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open scene focus mode")
+            Button { stopScene() } label: { Image(systemName: "stop.fill").frame(width: 38, height: 38).controlGlass(id: "scene-stop") }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Stop scene")
         }.padding(10).panelGlass()
     }
 
     private var scenePlayerSheet: some View {
-        VStack(alignment:.leading,spacing:20) {
-            HStack { Text(selectedScene?.name ?? "Scene").font(.system(size:24,weight:.bold,design:.rounded)); Spacer(); Button("Done"){showScenePlayer=false} }
-            HStack { Text("Speed"); Spacer(); Text("\(Int(sceneSpeed*100))%").monospacedDigit() }
-            Slider(value:$sceneSpeed,in:0.05...1).tint(accent)
-            HStack { Text("Brightness"); Spacer(); Text("\(Int(sceneBrightness))%").monospacedDigit() }
-            Slider(value:$sceneBrightness,in:1...100).tint(accent)
-            Button("Stop scene",systemImage:"stop.fill",role:.destructive) { stopScene(); showScenePlayer=false }
-                .buttonStyle(.glass)
-        }.padding(24).presentationBackground(.ultraThinMaterial)
+        ZStack {
+            LinearGradient(
+                colors: (selectedScene?.colors ?? [accent]) + Array((selectedScene?.colors ?? [accent]).reversed()),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .overlay(Color.black.opacity(0.48))
+            .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                HStack {
+                    Button {
+                        showScenePlayer = false
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(width: 42, height: 42)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close scene player")
+                    Spacer()
+                    Text("SCENE FOCUS")
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(2)
+                        .foregroundStyle(.white.opacity(0.7))
+                    Spacer()
+                    Button {
+                        stopScene()
+                        showScenePlayer = false
+                    } label: {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 13, weight: .bold))
+                            .frame(width: 42, height: 42)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Stop scene")
+                }
+                .padding(.top, 14)
+
+                Spacer()
+                VStack(spacing: 12) {
+                    Image(systemName: selectedScene?.symbol ?? "sparkles")
+                        .font(.system(size: 38, weight: .ultraLight))
+                        .symbolRenderingMode(.hierarchical)
+                    Text(selectedScene?.name ?? "Scene")
+                        .font(.system(size: 32, weight: .bold))
+                        .tracking(-0.8)
+                        .multilineTextAlignment(.center)
+                    Text(scenePaused ? "Paused" : "Lighting the room")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+                .shadow(color: .black.opacity(0.3), radius: 16)
+                Spacer()
+
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack {
+                        Label("Loop duration", systemImage: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 13, weight: .semibold))
+                        Spacer()
+                        Text(sceneDurationLabel)
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                            .monospacedDigit()
+                    }
+                    Slider(value: $sceneSpeed, in: 0...1)
+                        .tint(.white)
+                        .accessibilityLabel("Scene loop duration")
+                        .accessibilityValue(sceneDurationLabel)
+
+                    HStack {
+                        Text("30 min").font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.62))
+                        Spacer()
+                        Text("10 sec").font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.62))
+                    }
+
+                    HStack {
+                        Label("Brightness", systemImage: "sun.max.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                        Spacer()
+                        Text("\(Int(sceneBrightness))%")
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    }
+                    Slider(value: $sceneBrightness, in: 1...100)
+                        .tint(.white)
+
+                    Button {
+                        scenePaused.toggle()
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    } label: {
+                        Label(scenePaused ? "Resume scene" : "Pause scene", systemImage: scenePaused ? "play.fill" : "pause.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(maxWidth: .infinity, minHeight: 52)
+                            .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 17, style: .continuous).stroke(.white.opacity(0.2), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(20)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 25, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 25, style: .continuous).stroke(.white.opacity(0.18), lineWidth: 1))
+                .padding(.bottom, 18)
+            }
+            .padding(.horizontal, 22)
+        }
+        .preferredColorScheme(.dark)
+        .statusBarHidden()
+        .onChange(of: sceneBrightness) { _, value in lights.setBrightness(value) }
+    }
+
+    private var sceneDurationLabel: String {
+        let seconds = 10 * pow(180, 1 - sceneSpeed)
+        if seconds < 60 { return "\(Int(seconds.rounded())) sec" }
+        let minutes = seconds / 60
+        return minutes >= 10 ? "\(Int(minutes.rounded())) min" : String(format: "%.1f min", minutes)
     }
 
     private var music: some View {
@@ -337,10 +668,10 @@ struct ContentView: View {
                 visualizer
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text("Microphone input").font(.system(size: 13, weight: .semibold, design: .rounded))
+                        Text("Microphone input").font(.system(size: 13, weight: .semibold))
                         Spacer()
                         Text(audio.isRunning ? "\(Int(audio.inputLevel * 100))%" : "Off")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .font(.system(size: 12, weight: .medium))
                             .monospacedDigit()
                             .foregroundStyle(.white.opacity(0.65))
                     }
@@ -357,17 +688,17 @@ struct ContentView: View {
                     else { audio.start() }
                 } label: {
                     Label(audio.isRunning ? "Stop listening" : "Start listening",systemImage:audio.isRunning ? "stop.fill" : "mic.fill")
-                        .font(.system(size:16,weight:.bold,design:.rounded))
+                        .font(.system(size:16,weight:.bold))
                         .frame(maxWidth:.infinity).padding(.vertical,17)
                         .controlGlass(id:"music-primary",tint:accent.opacity(0.42))
                 }.buttonStyle(.plain)
                 VStack(alignment:.leading,spacing:14) {
-                    Text("Mode").font(.system(size:14,weight:.semibold,design:.rounded))
+                    Text("Mode").font(.system(size:14,weight:.semibold))
                     GlassEffectContainer(spacing:4) {
                         HStack(spacing:4) {
                             ForEach(["Rhythm","Energy","Spectrum","Rolling"],id:\.self) { mode in
                                 Button(mode) { musicMode=mode; UISelectionFeedbackGenerator().selectionChanged() }
-                                    .font(.system(size:11,weight:.semibold,design:.rounded))
+                                    .font(.system(size:11,weight:.semibold))
                                     .frame(maxWidth:.infinity).padding(.vertical,11)
                                     .background {
                                         if musicMode == mode {
@@ -379,10 +710,10 @@ struct ContentView: View {
                         }
                     }
                     HStack { Text("Sensitivity"); Spacer(); Text("\(Int(sensitivity*100))%").monospacedDigit() }
-                        .font(.system(size:13,weight:.medium,design:.rounded))
+                        .font(.system(size:13,weight:.medium))
                     Slider(value:$sensitivity,in:0.1...1).tint(accent)
                 }.padding(17).panelGlass()
-                Text(lights.connectedName == nil ? "Microphone: \(audio.message) · Connect your LED to see color changes." : audio.message).font(.system(size:12,weight:.medium,design:.rounded)).foregroundStyle(.white.opacity(0.58)).frame(maxWidth:.infinity,alignment:.leading)
+                Text(lights.connectedName == nil ? "Microphone: \(audio.message) · Connect your LED to see color changes." : audio.message).font(.system(size:12,weight:.medium)).foregroundStyle(.white.opacity(0.58)).frame(maxWidth:.infinity,alignment:.leading)
             }
         }
         .onChange(of:audio.inputLevel) { _, _ in updateMusicColor() }
@@ -395,32 +726,72 @@ struct ContentView: View {
     }
 
     private var visualizer: some View {
-        TimelineView(.animation(minimumInterval:0.05,paused:reduceMotion && !audio.isRunning)) { timeline in
-            let phase=timeline.date.timeIntervalSinceReferenceDate
-            let levels=(0..<32).map { i -> CGFloat in
-                let idle=0.12+0.07*sin(phase*1.7+Double(i)*0.55)
-                let active=audio.isRunning ? 0.04+audio.inputLevel*CGFloat(0.82)*(0.35+0.65*CGFloat(abs(sin(Double(i)*0.34+phase*2.2)))) : idle
-                return max(0.08,min(1,active))
-            }
-            HStack(alignment:.center,spacing:4) {
-                ForEach(0..<32,id:\.self) { i in
-                    Capsule().fill(LinearGradient(colors:[accent.opacity(0.55),accent,.white.opacity(0.88)],startPoint:.bottom,endPoint:.top))
-                        .frame(maxWidth:.infinity).frame(height:max(8,150*levels[i]))
-                        .shadow(color:accent.opacity(0.35),radius:4)
+        let soundDetected = audio.isRunning && audio.inputLevel >= 0.20
+        return VStack(spacing: 12) {
+            if soundDetected {
+                TimelineView(.animation(minimumInterval: 0.08, paused: reduceMotion)) { _ in
+                    audioBars
                 }
-            }.frame(height:156).padding(.horizontal,5)
+                .frame(height: 142)
+            } else {
+                HStack(alignment: .center, spacing: 4) {
+                    ForEach(0..<32, id: \.self) { _ in
+                        Capsule()
+                            .fill(.white.opacity(0.18))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 8)
+                    }
+                }
+                .frame(height: 142)
+                .padding(.horizontal, 5)
+            }
+
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(soundDetected ? .green : .orange.opacity(0.85))
+                    .frame(width: 7, height: 7)
+                Text(soundDetected ? "Sound detected" : (audio.isRunning ? "Waiting for sound" : "Microphone off"))
+                    .font(.system(size: 11, weight: .semibold))
+                Spacer()
+                Text(soundDetected ? "\(Int(audio.inputLevel * 100))% input" : "Idle")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.48))
+            }
         }
-        .padding(18).frame(maxWidth:.infinity)
+        .padding(18)
+        .frame(maxWidth: .infinity)
         .panelGlass()
+        .accessibilityElement(children: .combine)
+    }
+
+    private var audioBars: some View {
+        let bands = [audio.bass, audio.mid, audio.high]
+        let levels = (0..<32).map { index -> CGFloat in
+            let band = index < 10 ? bands[0] : (index < 22 ? bands[1] : bands[2])
+            let distance = abs(Double(index) - 15.5) / 15.5
+            let shaped = max(0.04, min(1, band * (1.25 - distance * 0.52)))
+            return CGFloat(shaped)
+        }
+        return HStack(alignment: .center, spacing: 4) {
+            ForEach(0..<32, id: \.self) { index in
+                Capsule()
+                    .fill(LinearGradient(colors: [accent.opacity(0.58), accent, .white.opacity(0.88)], startPoint: .bottom, endPoint: .top))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: max(8, 142 * levels[index]))
+                    .shadow(color: accent.opacity(0.26), radius: 4)
+            }
+        }
+        .frame(height: 142)
+        .padding(.horizontal, 5)
     }
 
     private var timersPage: some View {
         screen("Timers") {
             VStack(spacing:14) {
                 VStack(alignment:.leading,spacing:16) {
-                    HStack { Text("Next routine").font(.system(size:14,weight:.semibold,design:.rounded)); Spacer(); Text(timers.enabled ? "ACTIVE" : "READY").font(.system(size:10,weight:.bold,design:.rounded)).tracking(1).foregroundStyle(timers.enabled ? accent : .white.opacity(0.5)) }
+                    HStack { Text("Next routine").font(.system(size:14,weight:.semibold)); Spacer(); Text(timers.enabled ? "ACTIVE" : "READY").font(.system(size:10,weight:.bold)).tracking(1).foregroundStyle(timers.enabled ? accent : .white.opacity(0.5)) }
                     DatePicker("Time",selection:$timerDate,displayedComponents:.hourAndMinute)
-                        .datePickerStyle(.compact).font(.system(size:17,weight:.semibold,design:.rounded))
+                        .datePickerStyle(.compact).font(.system(size:17,weight:.semibold))
                     HStack(spacing:10) {
                         timerTile("Sunrise","sunrise.fill",.orange) {
                             timers.scheduleWake(at:timerDate,brightness:{lights.setBrightness($0)},powerOn:{if !lights.isOn {lights.togglePower()}})
@@ -437,7 +808,7 @@ struct ContentView: View {
                     HStack { Text("Wake ramp"); Spacer(); Text("\(Int(timers.wakeMinutes)) min").monospacedDigit() }
                     Slider(value:$timers.wakeMinutes,in:5...60,step:1).tint(accent)
                     if timers.enabled { Button("Cancel active timer",role:.destructive) { timers.cancel() }.buttonStyle(.glass) }
-                    Text(timers.message).font(.system(size:11,weight:.medium,design:.rounded)).foregroundStyle(.white.opacity(0.55))
+                    Text(timers.message).font(.system(size:11,weight:.medium)).foregroundStyle(.white.opacity(0.55))
                 }.padding(18).panelGlass()
             }
         }
@@ -451,7 +822,7 @@ struct ContentView: View {
         } label: {
             VStack(spacing:8) {
                 Image(systemName:symbol).font(.system(size:19,weight:.semibold))
-                Text(title).font(.system(size:11,weight:.semibold,design:.rounded))
+                Text(title).font(.system(size:11,weight:.semibold))
             }.frame(maxWidth:.infinity).padding(.vertical,13)
                 .controlGlass(id:"timer-\(title)",tint:tint.opacity(0.28))
         }.buttonStyle(.plain)
@@ -509,7 +880,7 @@ struct ContentView: View {
         NavigationStack {
             List {
                 Section {
-                    HStack { Circle().fill(lights.isPoweredOn ? .green : .orange).frame(width:8,height:8); Text(lights.status).font(.system(size:13,weight:.medium,design:.rounded)) }
+                    HStack { Circle().fill(lights.isPoweredOn ? .green : .orange).frame(width:8,height:8); Text(lights.status).font(.system(size:13,weight:.medium)) }
                 }
                 Section("Color compatibility") {
                     Picker("Frame format", selection: Binding(
@@ -543,7 +914,7 @@ struct ContentView: View {
                         HStack {
                             Image(systemName:"lightbulb.led").foregroundStyle(accent)
                             VStack(alignment:.leading,spacing:3) {
-                                Text(device.name ?? "Bluetooth LED").font(.system(size:14,weight:.semibold,design:.rounded))
+                                Text(device.name ?? "Bluetooth LED").font(.system(size:14,weight:.semibold))
                                 Text(device.identifier.uuidString).font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
                             }
                             Spacer()
@@ -561,9 +932,21 @@ struct ContentView: View {
         }.preferredColorScheme(.dark)
     }
 
-    private var visibleScenes:[LEDScene] {
-        let all=LEDScene.library+diySaved
-        return selectedCategory == "All" ? all : all.filter{$0.category == selectedCategory}
+    private var visibleScenes: [LEDScene] {
+        var all = LEDScene.library + diySaved
+        if selectedCategory != "All" {
+            all = all.filter { $0.category == selectedCategory }
+        }
+        switch sceneShelf {
+        case "Favorites":
+            all = all.filter { favoriteSceneIDs.contains($0.id) }
+        case "Recently used":
+            let lookup = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
+            all = recentSceneIDs.compactMap { lookup[$0] }
+        default:
+            break
+        }
+        return all
     }
 
     private func panelGlass()->some View {
@@ -622,7 +1005,7 @@ struct ContentView: View {
         return sqrt(dl*dl+da*da+db*db)<0.075
     }
 
-    private func startScene(_ scene:LEDScene) {
+    private func startScene(_ scene: LEDScene) {
         sceneTask?.cancel()
         guard !scene.colors.isEmpty else { return }
         guard lights.connectedName != nil else {
@@ -631,28 +1014,33 @@ struct ContentView: View {
         }
         lights.setBrightness(sceneBrightness)
         let speed = scene.category == "DIY" ? scene.speed : sceneSpeed
-        // A complete color crossfade takes several seconds at normal speed.
-        // The slower BLE cadence avoids the rapid on/off appearance of a strobe.
-        let interval = 0.12 + (1.0 - speed) * 0.10
+        let loopDuration = 10 * pow(180, 1 - max(0, min(1, speed)))
+        let interval = min(1.0, max(0.18, loopDuration / 180.0))
         sceneTask = Task { @MainActor in
+            var elapsed = 0.0
             var frame = 0
             while !Task.isCancelled {
+                if scenePaused {
+                    do { try await Task.sleep(for: .milliseconds(120)) } catch { return }
+                    continue
+                }
+
                 let count = scene.colors.count
-                let framesPerColor = 32
-                let segment = frame / framesPerColor
-                let phase = Double(frame % framesPerColor) / Double(framesPerColor - 1)
-                let base = scene.colors[segment % count]
-                let next = scene.colors[(segment + 1) % count]
+                let progress = (elapsed / loopDuration).truncatingRemainder(dividingBy: 1)
+                let position = progress * Double(count)
+                let segment = Int(position) % count
+                let phase = position - floor(position)
                 let smooth = phase * phase * (3.0 - 2.0 * phase)
-                let wave = 0.5 - 0.5 * cos(Double(frame % 64) * 2.0 * Double.pi / 64.0)
+                let base = scene.colors[segment]
+                let next = scene.colors[(segment + 1) % count]
+                let wave = 0.5 - 0.5 * cos(progress * 2.0 * Double.pi)
                 let color: Color
 
                 switch scene.motion {
                 case "Rainbow":
-                    color = Color(hue: Double(frame % 120) / 120.0, saturation: 0.94, brightness: 1.0)
+                    color = Color(hue: progress, saturation: 0.94, brightness: 1.0)
                 case "Strobe":
-                    // Soft strobe: retain a visible floor instead of hard black cuts.
-                    let pulse = frame % 16 < 8 ? 1.0 : 0.42
+                    let pulse = frame % 8 < 4 ? 1.0 : 0.48
                     color = ColorScience.dim(base, level: pulse)
                 case "Candle flicker":
                     let levels: [Double] = [0.78,0.93,0.84,1.0,0.74,0.91,0.82,0.97,0.70,0.89,0.80,0.95]
@@ -663,24 +1051,37 @@ struct ContentView: View {
                     color = ColorScience.dim(base, level: 0.10 + 0.90 * wave)
                 case "Aurora", "Fade":
                     let blended = ColorScience.mixColor(base, next, t: smooth)
-                    // Single-color scenes still animate through a gentle luminance envelope.
                     let level = count == 1 ? 0.48 + 0.52 * wave : 0.92 + 0.08 * wave
                     color = ColorScience.dim(blended, level: level)
                 default:
                     color = ColorScience.mixColor(base, next, t: smooth)
                 }
 
-                apply(color,persist:false)
+                apply(color, persist: false)
+                elapsed += interval
                 frame += 1
                 do { try await Task.sleep(for: .seconds(interval)) } catch { return }
             }
         }
     }
-    private func restartScene() { if let scene=selectedScene { startScene(scene) } }
-    private func stopScene() { sceneTask?.cancel(); sceneTask=nil; selectedScene=nil; lights.persistCurrentState() }
+
+    private func restartScene() {
+        if let scene = selectedScene {
+            scenePaused = false
+            startScene(scene)
+        }
+    }
+
+    private func stopScene() {
+        sceneTask?.cancel()
+        sceneTask = nil
+        selectedScene = nil
+        scenePaused = false
+        lights.persistCurrentState()
+    }
 
     private func updateMusicColor() {
-        guard audio.isRunning else { return }
+        guard audio.isRunning, audio.inputLevel >= 0.20 else { return }
         let level = min(1.0, audio.inputLevel * (0.65 + sensitivity * 3.2))
         let bass = min(1.0, audio.bass * sensitivity * 4.0)
         let mid = min(1.0, audio.mid * sensitivity * 4.0)
