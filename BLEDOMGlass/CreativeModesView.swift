@@ -45,22 +45,7 @@ struct CreativeModesView: View {
             animationPreview
             LazyVGrid(columns: columns, spacing: 10) {
                 ForEach(CreativeMode.allCases) { item in
-                    Button {
-                        select(item)
-                    } label: {
-                        HStack(spacing: 9) {
-                            Image(systemName: item.icon).font(.system(size: 15, weight: .semibold))
-                                .frame(width: 34, height: 34)
-                                .background(mode == item ? Color.cyan.opacity(0.22) : .white.opacity(0.07), in: RoundedRectangle(cornerRadius: 11))
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(item.rawValue).font(.system(size: 12, weight: .semibold))
-                                Text(item.needsMic ? "Uses microphone" : (item == .off ? "Manual color" : "Animated effect"))
-                                    .font(.system(size: 9)).foregroundStyle(.white.opacity(0.48))
-                            }
-                            Spacer(minLength: 0)
-                        }.padding(10).background(mode == item ? Color.cyan.opacity(0.10) : .white.opacity(0.035), in: RoundedRectangle(cornerRadius: 15))
-                            .overlay(RoundedRectangle(cornerRadius: 15).stroke(mode == item ? .cyan.opacity(0.45) : .white.opacity(0.08), lineWidth: 1))
-                    }.buttonStyle(.plain).foregroundStyle(.white)
+                    effectButton(item)
                 }
             }
             if mode.needsMic {
@@ -117,6 +102,37 @@ struct CreativeModesView: View {
         .overlay(RoundedRectangle(cornerRadius: 27, style: .continuous).stroke(.white.opacity(0.16), lineWidth: 1))
         .onReceive(Timer.publish(every: 0.12, on: .main, in: .common).autoconnect()) { _ in tick() }
         .onDisappear { audio.stop(); mode = .off; lights.persistCurrentState() }
+    }
+
+    private func effectButton(_ item: CreativeMode) -> some View {
+        let selected = mode == item
+        let subtitle = item.needsMic ? "Uses microphone" : (item == .off ? "Manual color" : "Animated effect")
+        let fill = selected ? Color.cyan.opacity(0.10) : Color.white.opacity(0.035)
+        let iconFill = selected ? Color.cyan.opacity(0.22) : Color.white.opacity(0.07)
+        let outline = selected ? Color.cyan.opacity(0.45) : Color.white.opacity(0.08)
+
+        return Button {
+            select(item)
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: item.icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 34, height: 34)
+                    .background(iconFill, in: RoundedRectangle(cornerRadius: 11))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.rawValue).font(.system(size: 12, weight: .semibold))
+                    Text(subtitle)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.48))
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .background(fill, in: RoundedRectangle(cornerRadius: 15))
+            .overlay(RoundedRectangle(cornerRadius: 15).stroke(outline, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
     }
 
     private var animationPreview: some View {
