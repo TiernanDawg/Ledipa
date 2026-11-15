@@ -204,13 +204,15 @@ final class BLEController: NSObject, ObservableObject {
         }
     }
 
-    func setColor(red r: Double, green g: Double, blue b: Double) {
+    func setColor(red r: Double, green g: Double, blue b: Double, persist: Bool = true) {
         red = normalizedChannel(r)
         green = normalizedChannel(g)
         blue = normalizedChannel(b)
-        persistState()
+        if persist { persistState() }
         sendColor()
     }
+
+    func persistCurrentState() { persistState() }
 
     func sendColor() {
         guard let peripheral = activePeripheral, let characteristic = writeCharacteristic else { return }
