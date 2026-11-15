@@ -236,7 +236,11 @@ final class BLEController: NSObject, ObservableObject {
         }
     }
 
-    func setColor(red r: Double, green g: Double, blue b: Double, persist: Bool = true) {
+    func setColor(red r: Double, green g: Double, blue b: Double) {
+        setColor(red: r, green: g, blue: b, persist: true)
+    }
+
+    func setColor(red r: Double, green g: Double, blue b: Double, persist: Bool) {
         red = normalizedChannel(r)
         green = normalizedChannel(g)
         blue = normalizedChannel(b)
