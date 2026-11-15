@@ -40,6 +40,30 @@ import Combine
         }
     }
 
+    func fadeToBrightness(_ targetBrightness: Double, startingAt currentBrightness: Double, brightness: @escaping (Double) -> Void) {
+        cancel(updateMessage: false)
+        defaults.set(sleepMinutes, forKey: "morgs.timer.sleep")
+        enabled = true
+        message = "Evening fade running"
+        let duration = min(720, max(1, sleepMinutes)) * 60
+        let start = max(0, min(100, currentBrightness))
+        let target = max(0, min(100, targetBrightness))
+        task = Task { @MainActor in
+            let steps = 60
+            for step in 0...steps {
+                if Task.isCancelled { return }
+                let progress = Double(step) / Double(steps)
+                let eased = progress * progress * (3 - 2 * progress)
+                brightness(start + (target - start) * eased)
+                do { try await Task.sleep(for: .seconds(duration / Double(steps))) }
+                catch { return }
+            }
+            enabled = false
+            message = "Evening fade completed"
+            task = nil
+        }
+    }
+
     func scheduleWake(at date: Date, brightness: @escaping (Double) -> Void, powerOn: @escaping () -> Void) {
         cancel(updateMessage: false)
         scheduledTime = date
