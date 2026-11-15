@@ -12,6 +12,28 @@ struct LEDPreset: Identifiable, Codable, Equatable {
     var color: Color { Color(red: red, green: green, blue: blue) }
 }
 
+enum LEDColorFrameFormat: String, CaseIterable, Identifiable {
+    case standard
+    case bledom07
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .standard: return "Standard (00 / 00)"
+        case .bledom07: return "BLEDOM (07 / 10)"
+        }
+    }
+    var variantByte: UInt8 { self == .standard ? 0x00 : 0x07 }
+    var trailingByte: UInt8 { self == .standard ? 0x00 : 0x10 }
+}
+
+enum LEDChannelOrder: String, CaseIterable, Identifiable {
+    case rgb, rbg, grb, gbr, brg, bgr
+
+    var id: String { rawValue }
+    var title: String { rawValue.uppercased() }
+}
+
 final class BLEController: NSObject, ObservableObject {
     @Published var devices: [CBPeripheral] = []
     @Published var connectedName: String?
@@ -24,6 +46,9 @@ final class BLEController: NSObject, ObservableObject {
     @Published var blue: Double = 1.0
     @Published var brightness: Double = 80
     @Published var presets: [LEDPreset] = []
+    @Published var colorFrameFormat: LEDColorFrameFormat = .standard
+    @Published var channelOrder: LEDChannelOrder = .rgb
+    @Published private(set) var isColorTestRunning = false
 
     private var central: CBCentralManager!
     private var activePeripheral: CBPeripheral?
@@ -45,6 +70,7 @@ final class BLEController: NSObject, ObservableObject {
     private var responseWriteInFlight = false
     private var scanGeneration = 0
     private var reconnectGeneration = 0
+    private var colorTestTask: Task<Void, Never>?
 
     override init() {
         super.init()
@@ -56,6 +82,10 @@ final class BLEController: NSObject, ObservableObject {
             brightness = state["brightness"] as? Double ?? brightness
             isOn = state["isOn"] as? Bool ?? isOn
         }
+        if let raw = UserDefaults.standard.string(forKey: "morgs-led.color-frame-format"),
+           let saved = LEDColorFrameFormat(rawValue: raw) { colorFrameFormat = saved }
+        if let raw = UserDefaults.standard.string(forKey: "morgs-led.channel-order"),
+           let saved = LEDChannelOrder(rawValue: raw) { channelOrder = saved }
         if let data = UserDefaults.standard.data(forKey: presetsKey),
            let saved = try? JSONDecoder().decode([LEDPreset].self, from: data) {
             presets = saved
@@ -142,6 +172,7 @@ final class BLEController: NSObject, ObservableObject {
         isScanning = false
         status = "Connecting…"
         if let previous = activePeripheral, previous.identifier != peripheral.identifier {
+            colorTestTask?.cancel()
             central.cancelPeripheralConnection(previous)
         }
         activePeripheral = peripheral
@@ -150,6 +181,7 @@ final class BLEController: NSObject, ObservableObject {
     }
 
     func disconnect() {
+        colorTestTask?.cancel()
         reconnectGeneration += 1
         manualDisconnect = true
         guard let activePeripheral else {
@@ -214,12 +246,66 @@ final class BLEController: NSObject, ObservableObject {
 
     func persistCurrentState() { persistState() }
 
+    func setColorFrameFormat(_ format: LEDColorFrameFormat) {
+        colorFrameFormat = format
+        UserDefaults.standard.set(format.rawValue, forKey: "morgs-led.color-frame-format")
+        sendColor()
+    }
+
+    func setChannelOrder(_ order: LEDChannelOrder) {
+        channelOrder = order
+        UserDefaults.standard.set(order.rawValue, forKey: "morgs-led.channel-order")
+        sendColor()
+    }
+
+    private func orderedChannels() -> (UInt8, UInt8, UInt8) {
+        let r = UInt8((normalizedChannel(red) * 255).rounded())
+        let g = UInt8((normalizedChannel(green) * 255).rounded())
+        let b = UInt8((normalizedChannel(blue) * 255).rounded())
+        switch channelOrder {
+        case .rgb: return (r, g, b)
+        case .rbg: return (r, b, g)
+        case .grb: return (g, r, b)
+        case .gbr: return (g, b, r)
+        case .brg: return (b, r, g)
+        case .bgr: return (b, g, r)
+        }
+    }
+
+    func runColorTest() {
+        guard activePeripheral != nil, writeCharacteristic != nil, isOn else {
+            status = isOn ? "Connect to your light before testing colors" : "Turn your light on before testing colors"
+            return
+        }
+        colorTestTask?.cancel()
+        let original = (red, green, blue)
+        isColorTestRunning = true
+        colorTestTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let testColors: [(Double, Double, Double)] = [
+                (1, 0, 0), (0, 1, 0), (0, 0, 1)
+            ]
+            for color in testColors {
+                guard !Task.isCancelled else { break }
+                self.setColor(red: color.0, green: color.1, blue: color.2, persist: false)
+                do { try await Task.sleep(for: .milliseconds(700)) }
+                catch { break }
+            }
+            self.setColor(red: original.0, green: original.1, blue: original.2, persist: false)
+            self.persistCurrentState()
+            self.isColorTestRunning = false
+            self.colorTestTask = nil
+        }
+    }
+
     func sendColor() {
         guard let peripheral = activePeripheral, let characteristic = writeCharacteristic else { return }
-        let frame: [UInt8] = [0x7E, 0x00, 0x05, 0x03,
-                              UInt8((normalizedChannel(red) * 255).rounded()),
-                              UInt8((normalizedChannel(green) * 255).rounded()),
-                              UInt8((normalizedChannel(blue) * 255).rounded()), 0x00, 0xEF]
+        let channels = orderedChannels()
+        let frame: [UInt8] = [
+            0x7E, colorFrameFormat.variantByte, 0x05, 0x03,
+            channels.0, channels.1, channels.2,
+            colorFrameFormat.trailingByte, 0xEF
+        ]
         write(frame, to: peripheral, characteristic: characteristic)
     }
 
@@ -359,6 +445,7 @@ extension BLEController: CBCentralManagerDelegate {
         guard activePeripheral?.identifier == peripheral.identifier else { return }
         connectedName = nil
         activePeripheral = nil
+        colorTestTask?.cancel()
         writeCharacteristic = nil
         pendingWrites.removeAll()
         responseWriteInFlight = false
