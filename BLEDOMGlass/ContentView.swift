@@ -55,7 +55,19 @@ struct ContentView: View {
                 home.tabItem { Label("Home",systemImage:"house.fill") }.tag(0)
                 scenes.tabItem { Label("Scenes",systemImage:"sparkles") }.tag(1)
                 music.tabItem { Label("Music",systemImage:"waveform") }.tag(2)
-                timersPage.tabItem { Label("Timers",systemImage:"timer") }.tag(3)
+                timersPage.tabItem {
+                    Label {
+                        HStack(spacing: 3) {
+                            Text("Timers")
+                            if timers.enabled {
+                                Image(systemName: "clock.badge.checkmark")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                        }
+                    } icon: {
+                        Image(systemName: "timer")
+                    }
+                }.tag(3)
             }
             .tint(accent)
             .modifier(MinimizeTabBar())
@@ -134,13 +146,25 @@ struct ContentView: View {
             showingDevices=true
             if lights.devices.isEmpty { lights.scan() }
         } label: {
-            HStack(spacing:8) {
-                Circle().fill(lights.connectedName == nil ? (lights.status.localizedCaseInsensitiveContains("connect") ? .orange : .gray) : .green).frame(width:7,height:7)
-                Text(lights.connectedName ?? (lights.status.localizedCaseInsensitiveContains("connect") ? "Connecting" : "Not connected"))
-                    .font(.system(size:12,weight:.semibold)).lineLimit(1)
-                Image(systemName:"chevron.down").font(.system(size:9,weight:.bold)).opacity(0.65)
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(lights.connectedName == nil ? (lights.status.localizedCaseInsensitiveContains("connect") ? .orange : .gray) : .green)
+                    .frame(width: 7, height: 7)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(lights.connectedName ?? (lights.status.localizedCaseInsensitiveContains("connect") ? "Connecting" : "Not connected"))
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                    Text(lights.connectedName == nil ? "Bluetooth" : "\(lights.signalQualityLabel) · \(lights.signalRSSI.map { "\($0) dBm" } ?? "checking")")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .lineLimit(1)
+                }
+                Image(systemName: lights.connectedName == nil ? "antenna.radiowaves.left.and.right.slash" : "antenna.radiowaves.left.and.right")
+                    .font(.system(size: 12, weight: .medium))
+                    .opacity(0.82)
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).opacity(0.65)
             }
-            .padding(.horizontal,12).padding(.vertical,9)
+            .padding(.horizontal, 12).padding(.vertical, 7)
             .glassControl(id:"device",namespace:glassSpace,tint:lights.connectedName == nil ? .white.opacity(0.05) : .green.opacity(0.14))
         }.buttonStyle(.plain).accessibilityLabel("Bluetooth device, \(lights.connectedName ?? "not connected")")
     }
@@ -652,7 +676,6 @@ struct ContentView: View {
         }
         .preferredColorScheme(.dark)
         .statusBarHidden()
-        .onChange(of: sceneBrightness) { _, value in lights.setBrightness(value) }
     }
 
     private var sceneDurationLabel: String {
@@ -796,11 +819,11 @@ struct ContentView: View {
                         timerTile("Sunrise","sunrise.fill",.orange) {
                             timers.scheduleWake(at:timerDate,brightness:{lights.setBrightness($0)},powerOn:{if !lights.isOn {lights.togglePower()}})
                         }
-                        timerTile("Sunset","sunset.fill",.purple) {
-                            timers.sleepFade(startingAt:lights.brightness,brightness:{lights.setBrightness($0)},powerOff:{if lights.isOn {lights.togglePower()}})
+                        timerTile("Evening","sunset.fill",.purple) {
+                            timers.fadeToBrightness(25, startingAt: lights.brightness, brightness: { lights.setBrightness($0) })
                         }
                         timerTile("Sleep","moon.zzz.fill",.indigo) {
-                            timers.sleepFade(startingAt:lights.brightness,brightness:{lights.setBrightness($0)},powerOff:{if lights.isOn {lights.togglePower()}})
+                            timers.sleepFade(startingAt: lights.brightness,brightness:{lights.setBrightness($0)},powerOff:{if lights.isOn {lights.togglePower()}})
                         }
                     }
                     HStack { Text("Fade duration"); Spacer(); Text("\(Int(timers.sleepMinutes)) min").monospacedDigit() }
@@ -879,8 +902,37 @@ struct ContentView: View {
     private var deviceSheet: some View {
         NavigationStack {
             List {
+                Section("Connection quality") {
+                    HStack {
+                        Label("Signal", systemImage: "antenna.radiowaves.left.and.right")
+                        Spacer()
+                        Text(lights.signalRSSI.map { "\(lights.signalQualityLabel) · \($0) dBm" } ?? lights.signalQualityLabel)
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 5) {
+                        ForEach(0..<4, id: \.self) { index in
+                            Capsule()
+                                .fill(index < lights.signalBars ? accent : Color.white.opacity(0.10))
+                                .frame(height: 6)
+                        }
+                    }
+                    .frame(height: 10)
+                    signalHistoryGraph
+                        .frame(height: 54)
+                    Text("Signal history is sampled from CoreBluetooth every 10 seconds while connected. It reflects radio strength, not a guarantee of controller response.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
                 Section {
-                    HStack { Circle().fill(lights.isPoweredOn ? .green : .orange).frame(width:8,height:8); Text(lights.status).font(.system(size:13,weight:.medium)) }
+                    HStack {
+                        Circle().fill(lights.isPoweredOn ? .green : .orange).frame(width: 8, height: 8)
+                        Text(lights.status).font(.system(size: 13, weight: .medium))
+                    }
+                    Toggle("Reconnect automatically", isOn: Binding(
+                        get: { lights.autoConnectEnabled },
+                        set: { lights.setAutoConnectEnabled($0) }
+                    ))
                 }
                 Section("Color compatibility") {
                     Picker("Frame format", selection: Binding(
@@ -930,6 +982,32 @@ struct ContentView: View {
                 ToolbarItem(placement:.topBarTrailing){Button("Scan",systemImage:"arrow.clockwise"){lights.scan()}}
             }
         }.preferredColorScheme(.dark)
+    }
+
+    private var signalHistoryGraph: some View {
+        GeometryReader { geometry in
+            let values = lights.signalHistory
+            ZStack {
+                RoundedRectangle(cornerRadius: 10).fill(.white.opacity(0.045))
+                if values.count > 1 {
+                    Path { path in
+                        for index in values.indices {
+                            let x = CGFloat(index) / CGFloat(max(1, values.count - 1)) * geometry.size.width
+                            let normalized = CGFloat(max(0, min(1, Double(values[index] + 100) / 50)))
+                            let y = geometry.size.height - normalized * (geometry.size.height - 8) - 4
+                            if index == values.startIndex { path.move(to: CGPoint(x: x, y: y)) }
+                            else { path.addLine(to: CGPoint(x: x, y: y)) }
+                        }
+                    }
+                    .stroke(accent, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                } else {
+                    Text("Collecting signal samples…")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .accessibilityLabel("Bluetooth signal history graph")
     }
 
     private var visibleScenes: [LEDScene] {
