@@ -80,8 +80,7 @@ struct ContentView: View {
         .sheet(isPresented:$showingInfo) { infoSheet.presentationDetents([.medium,.large]) }
         .onAppear { restoreState() }
         .onOpenURL { handleAutomationURL($0) }
-        .onChange(of:lights.currentColor) { _, color in
-            addRecent(color)
+        .onChange(of: lights.currentColor) { _, color in
             syncWheel(to: color)
         }
         .onChange(of:temperature) { _, kelvin in
@@ -221,9 +220,15 @@ struct ContentView: View {
                     )
                     .frame(width: 292, height: 292)
                     .blur(radius: 18)
-                ColorWheel(hue: $hue, saturation: $wheelSaturation) { selected in
-                    apply(selected, persist: false)
-                }
+                ColorWheel(
+                    hue: $hue,
+                    saturation: $wheelSaturation,
+                    selection: { selected in apply(selected, persist: false) },
+                    onCommit: {
+                        addRecent(lights.currentColor)
+                        UISelectionFeedbackGenerator().selectionChanged()
+                    }
+                )
                 .frame(width: 224, height: 224)
                 .accessibilityLabel("Color selector")
                 .accessibilityHint("Drag around the wheel to choose hue and saturation.")
@@ -390,7 +395,7 @@ struct ContentView: View {
                                         Button("Set as favorite",systemImage:"star.fill") { addFavorite(color) }
                                         Button("Remove from favorites",systemImage:"star.slash") { favorites.removeAll{perceptuallyClose($0,color)}; persistState() }
                                     }
-                                    .onTapGesture { apply(color) }
+                                    .onTapGesture { apply(color); addRecent(color); UISelectionFeedbackGenerator().selectionChanged() }
                             }
                         }.padding(.vertical,3)
                     }
@@ -1056,7 +1061,6 @@ struct ContentView: View {
         // Keep the selected sRGB channels unchanged for the hardware command.
         let rgb=color.rgb
         lights.setColor(red:rgb.x,green:rgb.y,blue:rgb.z,persist:persist)
-        addRecent(color)
     }
 
     private func addRecent(_ color:Color) {
@@ -1255,6 +1259,7 @@ private struct ColorWheel: View {
     @Binding var hue: Double
     @Binding var saturation: Double
     let selection: (Color) -> Void
+    let onCommit: () -> Void
 
     var body: some View {
         GeometryReader { geometry in
@@ -1280,17 +1285,19 @@ private struct ColorWheel: View {
             }
             .frame(width: side, height: side)
             .contentShape(Circle())
-            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                let center = CGPoint(x: side / 2, y: side / 2)
-                let dx = value.location.x - center.x
-                let dy = value.location.y - center.y
-                let distance = min(1, hypot(dx, dy) / (side * 0.40))
-                var angle = atan2(dy, dx) + .pi / 2
-                if angle < 0 { angle += 2 * .pi }
-                hue = angle / (2 * .pi)
-                saturation = distance
-                selection(Color(hue: hue, saturation: saturation, brightness: 1))
-            })
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    let center = CGPoint(x: side / 2, y: side / 2)
+                    let dx = value.location.x - center.x
+                    let dy = value.location.y - center.y
+                    let distance = min(1, hypot(dx, dy) / (side * 0.40))
+                    var angle = atan2(dy, dx) + .pi / 2
+                    if angle < 0 { angle += 2 * .pi }
+                    hue = angle / (2 * .pi)
+                    saturation = distance
+                    selection(Color(hue: hue, saturation: saturation, brightness: 1))
+                }
+                .onEnded { _ in onCommit() })
         }
         .aspectRatio(1, contentMode: .fit)
         .accessibilityElement()
