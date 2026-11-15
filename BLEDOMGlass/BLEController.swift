@@ -49,7 +49,10 @@ final class BLEController: NSObject, ObservableObject {
     @Published var colorFrameFormat: LEDColorFrameFormat = .standard
     @Published var channelOrder: LEDChannelOrder = .rgb
     @Published private(set) var isColorTestRunning = false
+    @Published private(set) var signalRSSI: Int?
+    @Published private(set) var signalHistory: [Int] = []
 
+    private var rssiTimer: Timer?
     private var central: CBCentralManager!
     private var activePeripheral: CBPeripheral?
     private var writeCharacteristic: CBCharacteristic?
@@ -182,6 +185,7 @@ final class BLEController: NSObject, ObservableObject {
 
     func disconnect() {
         colorTestTask?.cancel()
+        stopRSSIMonitoring()
         reconnectGeneration += 1
         manualDisconnect = true
         guard let activePeripheral else {
@@ -216,6 +220,40 @@ final class BLEController: NSObject, ObservableObject {
             return
         }
         connectPeripheral(peripheral)
+    }
+
+    private func startRSSIMonitoring(_ peripheral: CBPeripheral) {
+        stopRSSIMonitoring()
+        signalRSSI = nil
+        signalHistory.removeAll()
+        peripheral.readRSSI()
+        rssiTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self, weak peripheral] _ in
+            guard let self, let peripheral,
+                  self.activePeripheral?.identifier == peripheral.identifier else { return }
+            peripheral.readRSSI()
+        }
+    }
+
+    private func stopRSSIMonitoring() {
+        rssiTimer?.invalidate()
+        rssiTimer = nil
+        signalRSSI = nil
+    }
+
+    var signalQualityLabel: String {
+        guard let rssi = signalRSSI else { return connectedName == nil ? "Unavailable" : "Measuring" }
+        if rssi >= -55 { return "Excellent" }
+        if rssi >= -67 { return "Strong" }
+        if rssi >= -78 { return "Fair" }
+        return "Weak"
+    }
+
+    var signalBars: Int {
+        guard let rssi = signalRSSI else { return 0 }
+        if rssi >= -55 { return 4 }
+        if rssi >= -67 { return 3 }
+        if rssi >= -78 { return 2 }
+        return 1
     }
 
     private func scheduleReconnect() {
@@ -397,6 +435,8 @@ extension BLEController: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         isPoweredOn = central.state == .poweredOn
         if !isPoweredOn {
+            stopRSSIMonitoring()
+            signalHistory.removeAll()
             scanGeneration += 1
             central.stopScan()
             isScanning = false
@@ -439,12 +479,14 @@ extension BLEController: CBCentralManagerDelegate {
         pendingWrites.removeAll()
         responseWriteInFlight = false
         connectedName = peripheral.name ?? "BLEDOM"
+        startRSSIMonitoring(peripheral)
         status = "Connected · discovering controls"
         peripheral.discoverServices(Array(supportedServiceIDs))
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         guard activePeripheral?.identifier == peripheral.identifier else { return }
+        stopRSSIMonitoring()
         activePeripheral = nil
         writeCharacteristic = nil
         pendingWrites.removeAll()
@@ -456,6 +498,7 @@ extension BLEController: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         guard activePeripheral?.identifier == peripheral.identifier else { return }
+        stopRSSIMonitoring()
         connectedName = nil
         activePeripheral = nil
         colorTestTask?.cancel()
@@ -468,6 +511,14 @@ extension BLEController: CBCentralManagerDelegate {
 }
 
 extension BLEController: CBPeripheralDelegate {
+    func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
+        guard activePeripheral?.identifier == peripheral.identifier, error == nil else { return }
+        let value = RSSI.intValue
+        signalRSSI = value
+        signalHistory.append(value)
+        if signalHistory.count > 30 { signalHistory.removeFirst(signalHistory.count - 30) }
+    }
+
     func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
         guard let characteristic = writeCharacteristic else { return }
         drainWriteQueue(for: peripheral, characteristic: characteristic)
