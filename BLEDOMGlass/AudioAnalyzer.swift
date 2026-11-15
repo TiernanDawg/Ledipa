@@ -17,13 +17,19 @@ final class AudioAnalyzer: ObservableObject {
     private let engine = AVAudioEngine()
     private var lastPublish = Date.distantPast
     private var generation = 0
+    private var permissionGeneration = 0
+    private var permissionRequestPending = false
 
     func start() {
-        guard !isRunning else { return }
+        guard !isRunning, !permissionRequestPending else { return }
+        permissionRequestPending = true
+        permissionGeneration += 1
+        let request = permissionGeneration
         message = "Requesting microphone access…"
         AVAudioApplication.requestRecordPermission { [weak self] allowed in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, self.permissionGeneration == request else { return }
+                self.permissionRequestPending = false
                 guard allowed else {
                     self.message = "Microphone permission denied. Enable it in Settings → Privacy & Security → Microphone."
                     return
@@ -107,6 +113,8 @@ final class AudioAnalyzer: ObservableObject {
     }
 
     func stop() {
+        permissionGeneration += 1
+        permissionRequestPending = false
         generation += 1
         stopEngineOnly()
         bass = 0
