@@ -69,7 +69,7 @@ struct CreativeModesView: View {
                         Label("Sound input", systemImage: "mic.fill").font(.system(size: 13, weight: .semibold))
                         Spacer()
                         Text(audio.isRunning ? "LIVE" : "OFF").font(.system(size: 9, weight: .bold)).tracking(1.2)
-                            .foregroundStyle(audio.available ? .green : .white.opacity(0.45))
+                            .foregroundStyle(audio.isRunning ? .green : .white.opacity(0.45))
                     }
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
@@ -81,8 +81,8 @@ struct CreativeModesView: View {
                     HStack {
                         Text(audio.message).font(.system(size: 10)).foregroundStyle(.white.opacity(0.52))
                         Spacer()
-                        Button(audio.available ? "Stop mic" : "Enable mic") {
-                            if audio.available { audio.stop() } else { audio.start() }
+                        Button(audio.isRunning ? "Stop mic" : "Enable mic") {
+                            if audio.isRunning { audio.stop() } else { audio.start() }
                         }.font(.system(size: 11, weight: .semibold)).padding(.horizontal, 12).padding(.vertical, 8)
                             .background(.white.opacity(0.1), in: Capsule()).buttonStyle(.plain)
                     }
@@ -150,7 +150,7 @@ struct CreativeModesView: View {
     private func tick() {
         guard mode != .off else { return }
         phase += speed * 0.048
-        let beat = min(1, audio.level * 3.5)
+        let beat = min(1, audio.inputLevel * 3.5)
         var r = 0.0, g = 0.0, b = 0.0
         switch mode {
         case .off: return
