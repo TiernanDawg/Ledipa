@@ -73,7 +73,7 @@ struct ContentView: View {
             .modifier(MinimizeTabBar())
         }
         .preferredColorScheme(.dark)
-        .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86),value:tab)
+        .animation(reduceMotion ? nil : MorgDesign.spring, value: tab)
         .sheet(isPresented:$showingDevices) { deviceSheet }
         .sheet(isPresented:$showDIY) { diySheet.presentationDetents([.large]) }
         .fullScreenCover(isPresented:$showScenePlayer) { scenePlayerSheet }
@@ -1289,6 +1289,8 @@ private struct ColorWheel: View {
     @Binding var saturation: Double
     let selection: (Color) -> Void
     let onCommit: () -> Void
+    @State private var pinchBaseSaturation = 1.0
+    @State private var pinchInProgress = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -1311,6 +1313,16 @@ private struct ColorWheel: View {
                         x: cos(hue * 2 * .pi - .pi / 2) * saturation * side * 0.40,
                         y: sin(hue * 2 * .pi - .pi / 2) * saturation * side * 0.40
                     )
+                Button(action: onCommit) {
+                    Circle()
+                        .fill(Color(hue: hue, saturation: saturation, brightness: 1))
+                        .frame(width: 42, height: 42)
+                        .overlay(Circle().stroke(.white.opacity(0.95), lineWidth: 3))
+                        .overlay(Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(.white).shadow(color: .black.opacity(0.6), radius: 3))
+                        .shadow(color: Color(hue: hue, saturation: saturation, brightness: 1).opacity(0.65), radius: 12)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Confirm selected color")
             }
             .frame(width: side, height: side)
             .contentShape(Circle())
@@ -1327,12 +1339,27 @@ private struct ColorWheel: View {
                     selection(Color(hue: hue, saturation: saturation, brightness: 1))
                 }
                 .onEnded { _ in onCommit() })
+            .simultaneousGesture(
+                MagnificationGesture()
+                    .onChanged { scale in
+                        if !pinchInProgress {
+                            pinchBaseSaturation = saturation
+                            pinchInProgress = true
+                        }
+                        saturation = min(1, max(0, pinchBaseSaturation * Double(scale)))
+                        selection(Color(hue: hue, saturation: saturation, brightness: 1))
+                    }
+                    .onEnded { _ in
+                        pinchInProgress = false
+                        onCommit()
+                    }
+            )
         }
         .aspectRatio(1, contentMode: .fit)
         .accessibilityElement()
         .accessibilityLabel("Hue and saturation")
         .accessibilityValue("Hue \(Int(hue * 360)) degrees, saturation \(Int(saturation * 100)) percent")
-        .accessibilityHint("Drag to select a color")
+        .accessibilityHint("Drag to change hue and saturation. Pinch with two fingers to adjust saturation, or tap the center to confirm the selected color.")
     }
 }
 
