@@ -116,7 +116,7 @@ struct CreativeModesView: View {
         .padding(19).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 27, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 27, style: .continuous).stroke(.white.opacity(0.16), lineWidth: 1))
         .onReceive(Timer.publish(every: 0.12, on: .main, in: .common).autoconnect()) { _ in tick() }
-        .onDisappear { audio.stop(); mode = .off }
+        .onDisappear { audio.stop(); mode = .off; lights.persistCurrentState() }
     }
 
     private var animationPreview: some View {
@@ -145,6 +145,7 @@ struct CreativeModesView: View {
         mode = newMode
         phase = 0
         if newMode.needsMic { audio.start() } else { audio.stop() }
+        if newMode == .off { lights.persistCurrentState() }
     }
 
     private func tick() {
@@ -183,7 +184,7 @@ struct CreativeModesView: View {
             ui.getRed(&rr, green: &gg, blue: &bb, alpha: &aa)
             r = Double(rr); g = Double(gg); b = Double(bb)
         }
-        lights.setColor(red: r, green: g, blue: b)
+        lights.setColor(red: r, green: g, blue: b, persist: false)
     }
 
     private func heading(_ title: String, subtitle: String) -> some View {
