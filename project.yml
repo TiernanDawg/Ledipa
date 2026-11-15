@@ -2,7 +2,7 @@ name: Luma
 options:
   bundleIdPrefix: com.tiernandawg
   deploymentTarget:
-    iOS: "26.0"
+    iOS: "27.0"
 targets:
   Luma:
     type: application
@@ -27,7 +27,7 @@ targets:
         INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: "Morg’s LED uses Bluetooth to find and control your nearby LED strip. No account or internet connection is required."
         INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription: "Morg’s LED uses Bluetooth to control your LED strip."
         SWIFT_VERSION: "5.0"
-        IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "27.0"
         SWIFT_STRICT_CONCURRENCY: minimal
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: YES
