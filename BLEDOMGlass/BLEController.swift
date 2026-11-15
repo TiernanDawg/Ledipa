@@ -397,6 +397,15 @@ extension BLEController: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         isPoweredOn = central.state == .poweredOn
         if !isPoweredOn {
+            scanGeneration += 1
+            central.stopScan()
+            isScanning = false
+            connectedName = nil
+            activePeripheral = nil
+            colorTestTask?.cancel()
+            writeCharacteristic = nil
+            pendingWrites.removeAll()
+            responseWriteInFlight = false
             status = central.state == .unauthorized ? "Bluetooth permission required" : "Bluetooth is unavailable"
         } else if autoConnectEnabled, rememberedDeviceID != nil {
             attemptAutoConnect()
