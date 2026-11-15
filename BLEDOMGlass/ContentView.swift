@@ -511,6 +511,33 @@ struct ContentView: View {
                 Section {
                     HStack { Circle().fill(lights.isPoweredOn ? .green : .orange).frame(width:8,height:8); Text(lights.status).font(.system(size:13,weight:.medium,design:.rounded)) }
                 }
+                Section("Color compatibility") {
+                    Picker("Frame format", selection: Binding(
+                        get: { lights.colorFrameFormat },
+                        set: { lights.setColorFrameFormat($0) }
+                    )) {
+                        ForEach(LEDColorFrameFormat.allCases) { format in
+                            Text(format.title).tag(format)
+                        }
+                    }
+                    Picker("RGB channel order", selection: Binding(
+                        get: { lights.channelOrder },
+                        set: { lights.setChannelOrder($0) }
+                    )) {
+                        ForEach(LEDChannelOrder.allCases) { order in
+                            Text(order.title).tag(order)
+                        }
+                    }
+                    Button {
+                        lights.runColorTest()
+                    } label: {
+                        Label(lights.isColorTestRunning ? "Testing colors…" : "Run RGB test", systemImage: "testtube.2")
+                    }
+                    .disabled(lights.connectedName == nil || !lights.isOn || lights.isColorTestRunning)
+                    Text("If colors are swapped or inaccurate, try another channel order or frame format. The test displays red, green, and blue, then restores your previous color. Supported formats vary by controller firmware.")
+                        .font(.system(size:11))
+                        .foregroundStyle(.secondary)
+                }
                 ForEach(lights.devices,id:\.identifier) { device in
                     Button { lights.connect(device); showingDevices=false } label: {
                         HStack {
