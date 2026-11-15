@@ -43,6 +43,8 @@ final class BLEController: NSObject, ObservableObject {
     private var reconnectAttempts = 0
     private var pendingWrites: [Data] = []
     private var responseWriteInFlight = false
+    private var scanGeneration = 0
+    private var reconnectGeneration = 0
 
     override init() {
         super.init()
@@ -98,12 +100,15 @@ final class BLEController: NSObject, ObservableObject {
 
     func scan() {
         guard isPoweredOn else { status = "Turn on Bluetooth to continue"; return }
+        scanGeneration += 1
+        let generation = scanGeneration
+        central.stopScan()
         devices.removeAll()
         status = "Searching nearby"
         isScanning = true
         central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
         DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
-            guard let self, self.isScanning else { return }
+            guard let self, self.scanGeneration == generation, self.isScanning else { return }
             self.central.stopScan()
             self.isScanning = false
             self.status = self.devices.isEmpty ? "No lights found — move closer and retry" : "Select your light"
@@ -111,6 +116,12 @@ final class BLEController: NSObject, ObservableObject {
     }
 
     func connect(_ peripheral: CBPeripheral) {
+        reconnectGeneration += 1
+        reconnectAttempts = 0
+        connectPeripheral(peripheral)
+    }
+
+    private func connectPeripheral(_ peripheral: CBPeripheral) {
         guard central.state == .poweredOn else {
             status = "Turn on Bluetooth to connect"
             return
@@ -121,21 +132,25 @@ final class BLEController: NSObject, ObservableObject {
             return
         }
         manualDisconnect = false
-        reconnectAttempts = 0
         pendingWrites.removeAll()
         responseWriteInFlight = false
         UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: rememberedDeviceIDKey)
         UserDefaults.standard.set(peripheral.name ?? "BLEDOM LED", forKey: rememberedDeviceNameKey)
         objectWillChange.send()
         central.stopScan()
+        scanGeneration += 1
         isScanning = false
         status = "Connecting…"
+        if let previous = activePeripheral, previous.identifier != peripheral.identifier {
+            central.cancelPeripheralConnection(previous)
+        }
         activePeripheral = peripheral
         peripheral.delegate = self
         central.connect(peripheral, options: nil)
     }
 
     func disconnect() {
+        reconnectGeneration += 1
         manualDisconnect = true
         guard let activePeripheral else {
             connectedName = nil
@@ -147,12 +162,14 @@ final class BLEController: NSObject, ObservableObject {
     }
 
     func setAutoConnectEnabled(_ enabled: Bool) {
+        if !enabled { reconnectGeneration += 1 }
         UserDefaults.standard.set(enabled, forKey: autoConnectKey)
         objectWillChange.send()
         if enabled { attemptAutoConnect() }
     }
 
     func forgetRememberedDevice() {
+        reconnectGeneration += 1
         UserDefaults.standard.removeObject(forKey: rememberedDeviceIDKey)
         UserDefaults.standard.removeObject(forKey: rememberedDeviceNameKey)
         UserDefaults.standard.set(false, forKey: autoConnectKey)
@@ -166,7 +183,25 @@ final class BLEController: NSObject, ObservableObject {
             status = "Saved LED not currently available — scan to find it"
             return
         }
-        connect(peripheral)
+        connectPeripheral(peripheral)
+    }
+
+    private func scheduleReconnect() {
+        guard autoConnectEnabled, !manualDisconnect, reconnectAttempts < 5, isPoweredOn else {
+            if manualDisconnect { manualDisconnect = false }
+            return
+        }
+        reconnectAttempts += 1
+        reconnectGeneration += 1
+        let generation = reconnectGeneration
+        let delay = min(30.0, pow(2.0, Double(reconnectAttempts)))
+        status = "Connection lost — retrying in \(Int(delay))s"
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.reconnectGeneration == generation,
+                  self.activePeripheral == nil, self.autoConnectEnabled,
+                  !self.manualDisconnect else { return }
+            self.attemptAutoConnect()
+        }
     }
 
     func setColor(red r: Double, green g: Double, blue b: Double) {
@@ -293,7 +328,11 @@ extension BLEController: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        activePeripheral = peripheral
+        guard activePeripheral?.identifier == peripheral.identifier else {
+            central.cancelPeripheralConnection(peripheral)
+            return
+        }
+        reconnectAttempts = 0
         peripheral.delegate = self
         writeCharacteristic = nil
         pendingWrites.removeAll()
@@ -304,41 +343,25 @@ extension BLEController: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        if activePeripheral?.identifier == peripheral.identifier {
-            activePeripheral = nil
-            writeCharacteristic = nil
-            pendingWrites.removeAll()
-            responseWriteInFlight = false
-        }
+        guard activePeripheral?.identifier == peripheral.identifier else { return }
+        activePeripheral = nil
+        writeCharacteristic = nil
+        pendingWrites.removeAll()
+        responseWriteInFlight = false
         connectedName = nil
-        status = error.map { "Connection failed: \($0.localizedDescription)" } ?? "Connection failed — tap to retry"
-        if autoConnectEnabled, !manualDisconnect, reconnectAttempts < 5, isPoweredOn {
-            reconnectAttempts += 1
-            let delay = min(20.0, pow(2.0, Double(reconnectAttempts)))
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self, self.activePeripheral == nil, self.autoConnectEnabled, !self.manualDisconnect else { return }
-                self.attemptAutoConnect()
-            }
-        } else if manualDisconnect {
-            manualDisconnect = false
-        }
+        status = error.map { "Connection failed: \($0.localizedDescription)" } ?? "Connection failed — retrying"
+        scheduleReconnect()
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        guard activePeripheral?.identifier == peripheral.identifier else { return }
         connectedName = nil
         activePeripheral = nil
         writeCharacteristic = nil
         pendingWrites.removeAll()
         responseWriteInFlight = false
-        status = error == nil ? "Disconnected" : "Connection lost — reconnecting"
-        if autoConnectEnabled, !manualDisconnect, reconnectAttempts < 5, isPoweredOn {
-            reconnectAttempts += 1
-            let delay = min(20.0, pow(2.0, Double(reconnectAttempts)))
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self, self.activePeripheral == nil, self.autoConnectEnabled, !self.manualDisconnect else { return }
-                self.attemptAutoConnect()
-            }
-        } else if manualDisconnect { manualDisconnect = false }
+        status = error == nil ? "Disconnected" : "Connection lost"
+        scheduleReconnect()
     }
 }
 
